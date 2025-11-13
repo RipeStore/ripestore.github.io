@@ -1,4 +1,4 @@
-// search.js - Fuse.js wrapper
+// Fuse.js options for fuzzy searching
 const fuseOpts = {
   includeScore: true,
   threshold: 0.26,
@@ -10,38 +10,60 @@ const fuseOpts = {
     { name: 'bundleIdentifier', weight: 0.2 }
   ]
 };
+
+// Fuse.js instance
 let fuse = null;
+// Array of all apps
 let allApps = [];
 
-export function initSearch(apps){
-  allApps = (apps||[]).slice();
+/**
+ * Initializes the search functionality with a list of apps.
+ * @param {Array} apps - An array of app objects.
+ * @returns {Fuse} The Fuse.js instance.
+ */
+export function initSearch(apps) {
+  allApps = (apps || []).slice();
   fuse = new Fuse(allApps, fuseOpts);
   return fuse;
 }
 
-export function addApps(apps){
-  if(!apps || !apps.length) return;
+/**
+ * Adds more apps to the search index.
+ * @param {Array} apps - An array of app objects to add.
+ */
+export function addApps(apps) {
+  if (!apps || !apps.length) return;
   apps.forEach(app => {
     if (app.versions && app.versions.length) {
+      // Create a separate entry for each version of the app
       app.versions.forEach(v => {
-        // Create a new object for each version, merging app-level and version-level data
         allApps.push({ ...app, ...v, _isVersion: true });
       });
     } else {
-      // If no versions array, treat the app itself as a single version
+      // If there are no versions, treat the app itself as a single entry
       allApps.push({ ...app, _isVersion: true });
     }
   });
-  if(!fuse) fuse = new Fuse(allApps, fuseOpts);
-  else fuse.add(allApps); // Add all new flattened apps to Fuse
+  if (!fuse) {
+    fuse = new Fuse(allApps, fuseOpts);
+  } else {
+    fuse.setCollection(allApps);
+  }
 }
 
-export function searchApps(q, appsToSearch = allApps, limit=50){
-  q = (q||'').trim();
+/**
+ * Searches for apps based on a query.
+ * @param {string} q - The search query.
+ * @param {Array} [appsToSearch=allApps] - The array of apps to search within.
+ * @param {number} [limit=50] - The maximum number of results to return.
+ * @returns {Array} An array of search results.
+ */
+export function searchApps(q, appsToSearch = allApps, limit = 50) {
+  q = (q || '').trim();
   const targetApps = appsToSearch || allApps;
-  if(!q) return targetApps.slice(0, limit);
+  if (!q) return targetApps.slice(0, limit);
 
-  // Re-initialize Fuse with the targetApps if it's different from allApps
+  // Use a different Fuse instance if searching a subset of apps
   let currentFuse = fuse;
   if (targetApps !== allApps) {
     currentFuse = new Fuse(targetApps, fuseOpts);
@@ -49,13 +71,14 @@ export function searchApps(q, appsToSearch = allApps, limit=50){
 
   const raw = currentFuse.search(q, { limit: limit * 2 });
   const qLower = q.toLowerCase();
-  const scored = raw.map(r=>{
+  // Score and sort the results
+  const scored = raw.map(r => {
     const item = r.item;
     let rel = 1 - (r.score ?? 1);
-    if(item.name && item.name.toLowerCase() === qLower) rel += 0.7;
-    else if(item.name && item.name.toLowerCase().startsWith(qLower)) rel += 0.4;
-    else if(item.name && item.name.toLowerCase().includes(qLower)) rel += 0.18;
+    if (item.name && item.name.toLowerCase() === qLower) rel += 0.7;
+    else if (item.name && item.name.toLowerCase().startsWith(qLower)) rel += 0.4;
+    else if (item.name && item.name.toLowerCase().includes(qLower)) rel += 0.18;
     return { item, rel };
-  }).sort((a,b)=>b.rel - a.rel).slice(0, limit).map(r=>r.item);
+  }).sort((a, b) => b.rel - a.rel).slice(0, limit).map(r => r.item);
   return scored;
 }

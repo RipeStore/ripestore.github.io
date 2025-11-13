@@ -87,9 +87,10 @@ html,body,.main,.pane,.grid,.card{max-width:100%;overflow-x:hidden}
   transition: transform .35s ease;
 }
 .topbar .brand a:hover { transform: translateY(-2px) scale(1.02); }
-/* Animated underline */
+/* Animated underline
 .topbar .brand a::after{ content:''; display:block; height:2px; width:38%; background:linear-gradient(90deg,var(--accent),#f6d365); margin-top:6px; transform-origin:left; transform:scaleX(1); opacity:.95; transition:opacity .5s ease, transform .6s ease; }
 50%{transform: scaleX(1)}100%{transform: scaleX(0)}}
+ */
 
 /* skeleton shimmer for loading cards */
 .app-skeleton{ height:86px; border-radius:8px; margin:10px 0; background:linear-gradient(90deg,#efefef 25%,#e0e0e0 50%,#efefef 75%); background-size:200% 100%; animation: shimmer 1.4s infinite;}
@@ -105,10 +106,6 @@ html,body,.main,.pane,.grid,.card{max-width:100%;overflow-x:hidden}
 /* share input style */
 .copy-input{ border:1px solid #ddd; padding:6px 8px; border-radius:6px; width:100%; font-size:0.9rem; background:#fafafa; }
 
-/* small status pill for source load status */
-.source-status{ font-size:12px; padding:4px 8px; border-radius:999px; display:inline-block; margin-left:8px; opacity:0.9; }
-.source-status.ok{ background: #e6ffed; color:#006644; }
-.source-status.err{ background:#ffecec; color:#8a2000; }
 
 /* nicer download button */
 .btn-download{ background:linear-gradient(90deg,#4f9aff,#2d7cff); color:white; padding:10px 14px; border-radius:8px; border:none; font-weight:600; }

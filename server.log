@@ -1,0 +1,4 @@
+127.0.0.1 - - [13/Nov/2025 05:09:52] "GET /app.html?bundle=com.cr4zy.nyxian&version=0.6.0&repo=https%3A%2F%2Fraw.githubusercontent.com%2Fripestore%2Frepos%2Fmain%2FRipeStore.json HTTP/1.1" 200 -
+127.0.0.1 - - [13/Nov/2025 05:09:52] "GET /app_page.js HTTP/1.1" 200 -
+127.0.0.1 - - [13/Nov/2025 05:09:52] "GET /style.css HTTP/1.1" 200 -
+127.0.0.1 - - [13/Nov/2025 05:09:52] "GET /utils.js HTTP/1.1" 200 -

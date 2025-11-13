@@ -43,56 +43,6 @@
     </div>
   </div>
 
-  
-  
-  <script type="module">
-    import { $, $$ } from './utils.js';
-    const KEY='ripe_sources';
-    const DEFAULTS=['RipeStore'];
-    function get(){try{return JSON.parse(localStorage.getItem(KEY))||DEFAULTS}catch(_){return DEFAULTS}}
-    function set(arr){localStorage.setItem(KEY, JSON.stringify(arr))}
-    let selected = null;
-    function render(){
-      const box = $('#sourceList'); box.innerHTML='';
-      get().forEach(url=>{
-        const row = document.createElement('div'); row.className='row';
-        const lab = document.createElement('div'); lab.className='label'; lab.textContent='Source';
-        const val = document.createElement('div'); val.className='value ellipsis'; val.textContent=url;
-        const hint = document.createElement('div'); hint.className='small'; hint.textContent=''; hint.style.color='var(--text-dim)';
-        row.appendChild(lab); row.appendChild(val); row.appendChild(hint);
-        row.addEventListener('click', (e)=>{
-          const list = get();
-          if(selected === url){
-            set(list.filter(x=>x!==url));
-            selected = null;
-            render();
-            return;
-          }
-          selected = url;
-          Array.from(document.querySelectorAll('#sourceList .row')).forEach(r=>r.classList.remove('selected'));
-          Array.from(document.querySelectorAll('#sourceList .row .small')).forEach(h=>h.textContent='');
-          row.classList.add('selected');
-          hint.textContent='Tap again to remove'; hint.style.color='crimson';
-        });
-        box.appendChild(row);
-      });
-    }
-    document.getElementById('addBtn').addEventListener('click', ()=>{
-      const v = document.getElementById('newSource').value.trim();
-      if(!v) return;
-      const list = get();
-      if(!list.includes(v)){ list.push(v); set(list); render(); }
-      document.getElementById('newSource').value='';
-      selected = null;
-    });
-    document.addEventListener('click', (e)=>{
-      if(!e.target.closest('#sourceList')){
-        selected = null;
-        Array.from(document.querySelectorAll('#sourceList .row')).forEach(r=>r.classList.remove('selected'));
-        Array.from(document.querySelectorAll('#sourceList .row .small')).forEach(h=>h.textContent='');
-      }
-    });
-    render();
-  </script>
+  <script type="module" src="sources.js"></script>
 </body>
 </html>
