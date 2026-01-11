@@ -31,9 +31,11 @@ async function loadAll() {
   $('#app-grid').innerHTML = '';
   showSkeleton();
 
-  const promises = sources.map(src => (async () => {
-    try {
-      const out = await fetchRepo(src);
+  const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
+  
+  results.forEach(res => {
+    if (res.status === 'fulfilled') {
+      const out = res.value;
       const normalized = normalizeRepo(out.data, out.url);
       
       if (normalized.news) state.allNews = state.allNews.concat(normalized.news);
@@ -41,14 +43,9 @@ async function loadAll() {
 
       addApps(normalized.apps);
       state.allMerged = state.allMerged.concat(normalized.apps);
-      return { src, ok: true };
-    } catch (err) {
-      console.error(err);
-      return { src, ok: false };
     }
-  })());
+  });
 
-  await Promise.allSettled(promises);
   state.allMerged = mergeByBundle(state.allMerged);
   
   renderFeatured();

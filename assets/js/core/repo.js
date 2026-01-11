@@ -1,4 +1,4 @@
-import { fetchJSON, semverCompare } from './utils.js';
+import { fetchJSON, semverCompare, parseDateString } from './utils.js';
 
 const cache = new Map();
 
@@ -10,14 +10,16 @@ export async function fetchRepo(src) {
     return cache.get(src);
   }
   // If it doesn't have a protocol, assume it's a relative path in our github repo structure
-  // But for general usage, we usually expect full URLs or we construct them.
-  // The original code had: const url = src.includes('://') ? src : `https://raw.githubusercontent.com/ripestore/repos/main/${src}.json`;
-  // We'll keep that logic if "src" is just a name.
   const url = src.includes('://') ? src : `https://raw.githubusercontent.com/ripestore/repos/main/${src}.json`;
-  const data = await fetchJSON(url);
-  const result = { data, url };
-  cache.set(src, result);
-  return result;
+  try {
+    const data = await fetchJSON(url);
+    const result = { data, url };
+    cache.set(src, result);
+    return result;
+  } catch (err) {
+    console.error(`Failed to fetch repo: ${url}`, err);
+    throw err;
+  }
 }
 
 /**
@@ -97,7 +99,7 @@ function parsePermissions(val) {
 }
 
 function toUnified(o, sourceUrl) {
-  const bundle = o.bundleIdentifier || o.bundleID || o.bundle || o.id || "";
+  const bundle = (o.bundleIdentifier || o.bundleID || o.bundle || o.id || "").trim();
   const icon = o.iconURL || o.icon || o.image || "";
   const name = o.name || o.title || bundle || "Unknown";
   const dev = o.developerName || o.dev || o.developer || "";
@@ -152,7 +154,7 @@ function toUnified(o, sourceUrl) {
 export function mergeByBundle(apps) {
   const map = new Map();
   for (const a of apps) {
-    const b = (a.bundle || '').trim();
+    const b = a.bundle;
     if (!b) {
       const key = Symbol('nobundle');
       map.set(key, a);
@@ -186,13 +188,17 @@ export function mergeByBundle(apps) {
   for (const v of map.values()) {
     if (Array.isArray(v.versions)) {
       v.versions.sort((x, y) => {
-        const dx = x.date ? new Date(x.date) : null;
-        const dy = y.date ? new Date(y.date) : null;
+        const dx = parseDateString(x.date);
+        const dy = parseDateString(y.date);
         if (dx && dy) return dy - dx;
         if (dx) return -1;
         if (dy) return 1;
         return semverCompare(y.version, x.version);
       });
+      // Update currentVersion to the latest one after sorting
+      if (v.versions.length > 0) {
+        v.currentVersion = v.versions[0].version;
+      }
     }
   }
   return Array.from(map.values());

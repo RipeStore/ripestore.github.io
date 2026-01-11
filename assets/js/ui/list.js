@@ -24,23 +24,18 @@ async function loadList() {
   let allNews = [];
   let featuredIds = [];
 
-  const promises = sources.map(src => (async () => {
-    try {
-      const out = await fetchRepo(src);
+  const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
+  
+  results.forEach(res => {
+    if (res.status === 'fulfilled') {
+      const out = res.value;
       const normalized = normalizeRepo(out.data, out.url);
-      
       if (normalized.news) allNews = allNews.concat(normalized.news);
       if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
-
       allMerged = allMerged.concat(normalized.apps);
-      return { src, ok: true };
-    } catch (err) {
-      console.error(err);
-      return { src, ok: false };
     }
-  })());
+  });
 
-  await Promise.allSettled(promises);
   allMerged = mergeByBundle(allMerged);
 
   if (type === 'featured') {
@@ -88,7 +83,6 @@ function renderFeatured(apps, ids) {
     
     const sub = document.createElement('div');
     sub.className = 'app-sub';
-    const ver = a.currentVersion;
     const subtitle = a.subtitle || a.desc || '';
     const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
     sub.textContent = parts.join(' • ');
