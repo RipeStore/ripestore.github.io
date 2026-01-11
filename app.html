@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>App Details</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body class="details-page">
+
+  <nav class="navbar glass">
+    <div class="nav-content">
+      <a href="./" class="back-link">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        Back
+      </a>
+    </div>
+  </nav>
+
+  <main class="details-main">
+    
+    <!-- Hero Header -->
+    <header class="app-header">
+      <img id="hero-icon" class="app-icon-large" src="" alt="">
+      <div class="app-header-info">
+        <h1 id="hero-title"></h1>
+        <p id="hero-subtitle"></p>
+        <div class="actions">
+          <a id="hero-get" class="btn-get" href="#">GET</a>
+          <button class="btn-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="separator"></div>
+
+    <!-- What's New -->
+    <section id="whats-new" class="section hidden">
+      <div class="section-header">
+        <h2>What's New</h2>
+        <div class="version-picker">
+          <select id="version-select"></select>
+        </div>
+      </div>
+      <p id="whats-new-text" class="text-body desc-clamped"></p>
+      <button id="whats-new-more-btn" class="more-btn" style="display:none">more</button>
+    </section>
+
+    <!-- Screenshots -->
+    <section id="screenshots-section" class="section hidden">
+      <h2>Preview</h2>
+      <div class="carousel-container">
+        <button class="scroll-btn left hidden" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <div id="screenshots-scroll" class="scroll-row screenshots-row"></div>
+        <button class="scroll-btn right" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+    </section>
+
+    <div class="separator"></div>
+
+    <!-- Description -->
+    <section class="section">
+      <p id="app-desc" class="text-body desc-clamped"></p>
+      <button id="desc-more-btn" class="more-btn" style="display:none">more</button>
+    </section>
+
+    <div class="separator"></div>
+
+    <!-- Information -->
+    <section class="section">
+      <h2>Information</h2>
+      <div class="info-list">
+        <div class="info-row">
+          <span class="label">Provider</span>
+          <span class="val" id="meta-provider"></span>
+        </div>
+        <div class="info-row">
+          <span class="label">Size</span>
+          <span class="val" id="meta-size"></span>
+        </div>
+        <div class="info-row">
+          <span class="label">Compatibility</span>
+          <span class="val" id="meta-min-os"></span>
+        </div>
+        <div class="info-row">
+          <span class="label">Category</span>
+          <span class="val" id="meta-cat"></span>
+        </div>
+        <div class="info-row" id="perm-section" style="display:none; cursor:pointer">
+          <span class="label">Permissions</span>
+          <span class="val accent" id="perm-btn">View Details</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Permissions Modal -->
+  <div id="perm-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>App Permissions</h3>
+        <button id="close-perm" class="close-btn">&times;</button>
+      </div>
+      <div id="perm-list" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/ui/details.js"></script>
+</body>
+</html>

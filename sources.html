@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Manage Sources</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+  <nav class="navbar glass">
+    <div class="nav-content">
+      <a href="./" class="back-link">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        Home
+      </a>
+      <div class="nav-brand">Sources</div>
+      <div style="width: 60px;"></div> <!-- spacer -->
+    </div>
+  </nav>
+
+  <main>
+    <section class="section">
+      <h2 class="section-title">Add Source</h2>
+      <div style="display: flex; gap: 10px;">
+        <input id="newSource" type="text" placeholder="https://example.com/repo.json" style="flex:1; padding: 10px; border-radius: 10px; border:none; background: var(--bg-secondary); color: white; font-size: 16px;">
+        <button id="addBtn" style="background: var(--accent); color: white; padding: 0 20px; border-radius: 10px; font-weight: 600;">Add</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">My Sources</h2>
+      <div id="sourceList" class="info-list" style="background: var(--bg-secondary); padding: 0 16px; border-radius: var(--radius-l);"></div>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/ui/sources.js"></script>
+</body>
+</html>

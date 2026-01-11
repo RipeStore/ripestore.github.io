@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>RipeStore</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="nav-content">
+      <div class="nav-brand">RipeStore</div>
+      <div class="nav-search">
+        <input type="text" id="search-input" placeholder="Search">
+      </div>
+      <div class="nav-links">
+        <a href="sources">Sources</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Featured Carousel -->
+    <section id="featured-section" class="section hidden">
+      <div class="section-header">
+        <h2 class="section-title">Featured</h2>
+        <a href="list?type=featured" class="view-all-link">View All</a>
+      </div>
+      <div class="carousel-container">
+        <button class="scroll-btn left hidden" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <div id="featured-grid" class="scroll-row"></div>
+        <button class="scroll-btn right" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+    </section>
+
+    <!-- News -->
+    <section id="news-section" class="section hidden">
+      <div class="section-header">
+        <h2 class="section-title">Latest News</h2>
+        <a href="list?type=news" class="view-all-link">View All</a>
+      </div>
+      <div class="carousel-container">
+        <button class="scroll-btn left hidden" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <div id="news-grid" class="scroll-row news-row"></div>
+        <button class="scroll-btn right" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+    </section>
+
+    <!-- App Grid -->
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">Apps</h2>
+        <div class="sort-picker">
+          <select id="sort-select">
+            <option value="name-asc">Name (A-Z)</option>
+            <option value="name-desc">Name (Z-A)</option>
+            <option value="date-desc">Newest</option>
+            <option value="date-asc">Oldest</option>
+          </select>
+        </div>
+      </div>
+      <div id="app-grid" class="grid"></div>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/ui/home.js"></script>
+</body>
+</html>
