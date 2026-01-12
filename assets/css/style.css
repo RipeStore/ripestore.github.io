@@ -10,7 +10,7 @@
   --radius-m: 12px;
   --radius-s: 8px;
   --pad: 20px;
-  --navbar-bg: rgba(0, 0, 0, 0.8);
+  --navbar-bg: #000000;
 }
 
 @media (prefers-color-scheme: light) {
@@ -21,7 +21,7 @@
     --text-secondary: #6c6c70;
     --accent: #007aff;
     --separator: #c6c6c8;
-    --navbar-bg: rgba(255, 255, 255, 0.8);
+    --navbar-bg: #ffffff;
   }
 }
 
@@ -353,6 +353,66 @@ main {
   overflow-wrap: anywhere;
 }
 
+.news-card.list-view {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  cursor: pointer;
+}
+
+.news-card.list-view img {
+  width: 100%;
+  height: 280px;
+  object-fit: cover;
+}
+
+.news-card.list-view .news-content {
+  padding: 16px;
+}
+
+.news-card.list-view .news-title {
+  font-weight: 600;
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+
+.news-card.list-view .news-caption {
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: pre-wrap;
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+
+/* Toast Notification */
+.toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 12px 24px;
+  border-radius: 50px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
+  z-index: 1000;
+  border: 1px solid var(--separator);
+  pointer-events: none;
+}
+
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
 /* App Grid */
 .grid {
   display: grid;
@@ -495,18 +555,34 @@ main {
   padding: 8px 32px;
   font-weight: 700;
   font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-icon {
   background: var(--bg-secondary);
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--accent);
   border: 0.5px solid var(--separator);
+  transition: transform 0.1s;
+}
+
+.btn-icon:active {
+  transform: scale(0.95);
+}
+
+.btn-icon svg {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .separator {
@@ -534,6 +610,14 @@ main {
   font-weight: 500;
 }
 
+.version-picker {
+  margin-left: 16px;
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .version-picker select,
 .sort-picker select {
   background: none;
@@ -542,8 +626,11 @@ main {
   font-size: 15px;
   font-weight: 500;
   text-align: right;
+  text-align-last: right;
   appearance: none;
   cursor: pointer;
+  direction: rtl;
+  max-width: 100%;
 }
 
 .text-body {
@@ -587,19 +674,21 @@ main {
 /* If we want expansion logic, we need JS toggling a class */
 
 /* Screenshots */
-.screenshots-row img {
+.screenshots-row img,
+.screenshots-row iframe {
   height: 380px;
   width: auto;
   aspect-ratio: var(--screenshot-ratio, 9 / 19.5); /* Dynamic or fallback to modern iPhone ratio */
   border-radius: 12px;
-  scroll-snap-align: center;
+  scroll-snap-align: start;
   object-fit: cover;
   background: var(--bg-secondary);
   border: 0.5px solid var(--separator);
 }
 
 @media (max-width: 600px) {
-  .screenshots-row img {
+  .screenshots-row img,
+  .screenshots-row iframe {
     height: auto;
     max-height: 320px;
     width: auto;

@@ -132,6 +132,36 @@ export function formatByteCount(bytes) {
   return `${size.toFixed(1)} ${units[i]}`;
 }
 
+/**
+ * Creates a debounced function that delays invoking func until after wait milliseconds have elapsed.
+ */
+export function debounce(fn, ms) {
+  let id;
+  return (...a) => {
+    clearTimeout(id);
+    id = setTimeout(() => fn(...a), ms);
+  }
+}
+
+/**
+ * Shows a toast notification.
+ */
+export function showToast(msg, duration = 2000) {
+  let toast = document.querySelector('.toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('show');
+  
+  clearTimeout(toast.timeout);
+  toast.timeout = setTimeout(() => {
+    toast.classList.remove('show');
+  }, duration);
+}
+
 // Unregister legacy Service Workers to prevent caching issues
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {

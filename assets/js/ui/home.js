@@ -1,10 +1,8 @@
-import { $, ellipsize, parseDateString } from '../core/utils.js';
-import { fetchRepo, normalizeRepo, mergeByBundle } from '../core/repo.js';
+import { $, ellipsize, parseDateString, qs, debounce } from '../core/utils.js';
+import { fetchAllRepos } from '../core/repo.js';
 import { initSearch, addApps, searchApps } from '../core/search.js';
 import { initCarousel } from '../core/carousel.js';
 
-const KEY = 'ripe_sources';
-const DEFAULTS = ['RipeStore'];
 const BATCH = 24;
 
 const state = {
@@ -17,13 +15,7 @@ const state = {
   sort: 'name-asc'
 };
 
-function getSources() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || DEFAULTS; }
-  catch (_) { return DEFAULTS; }
-}
-
 async function loadAll() {
-  const sources = getSources();
   state.allMerged = [];
   state.allNews = [];
   state.featuredIds = [];
@@ -31,27 +23,29 @@ async function loadAll() {
   $('#app-grid').innerHTML = '';
   showSkeleton();
 
-  const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
+  const { apps, news, featured } = await fetchAllRepos();
   
-  results.forEach(res => {
-    if (res.status === 'fulfilled') {
-      const out = res.value;
-      const normalized = normalizeRepo(out.data, out.url);
-      
-      if (normalized.news) state.allNews = state.allNews.concat(normalized.news);
-      if (normalized.featured) state.featuredIds = state.featuredIds.concat(normalized.featured);
+  state.allMerged = apps;
+  state.allNews = news;
+  state.featuredIds = featured;
 
-      addApps(normalized.apps);
-      state.allMerged = state.allMerged.concat(normalized.apps);
-    }
-  });
-
-  state.allMerged = mergeByBundle(state.allMerged);
+  addApps(state.allMerged);
   
   renderFeatured();
   renderNews();
 
   initSearch(state.allMerged);
+
+  // Check for search query param
+  const urlQ = qs('q');
+  if (urlQ) {
+    state.q = urlQ;
+    const input = $('#search-input');
+    if (input) input.value = urlQ;
+    $('#featured-section')?.classList.add('collapsed');
+    $('#news-section')?.classList.add('collapsed');
+  }
+
   filterAndPrepare();
 }
 
@@ -82,11 +76,8 @@ function renderFeatured() {
   // Calculate how many fit
   // Card width 320px + 16px gap = 336px. Container padding approx 40px.
   // We want to avoid scrolling, so we show N items that fit.
-  const containerWidth = window.innerWidth - 40;
-  let limit = Math.floor(containerWidth / 336);
-  if (limit < 1) limit = 1;
-  // Cap at 6 just in case
-  if (limit > 6) limit = 6;
+  // Wait, user wants more items, so we SHOULD allow scrolling.
+  let limit = 12;
 
   featuredApps.slice(0, limit).forEach(a => {
     const card = document.createElement('a');
@@ -142,16 +133,30 @@ function renderNews() {
     return (da && db) ? db - da : 0;
   });
 
+  const seenBundles = new Set();
+  const filteredNews = state.allNews.filter(n => {
+    if (n.appID) {
+      if (seenBundles.has(n.appID)) return false;
+      seenBundles.add(n.appID);
+    }
+    return true;
+  });
+
+  // Push items without images to the end
+  filteredNews.sort((a, b) => {
+      const hasA = !!a.image;
+      const hasB = !!b.image;
+      if (hasA === hasB) return 0; // Keep date order
+      return hasA ? -1 : 1;
+  });
+
   grid.innerHTML = '';
   
   // Calculate fit
   // Card width 260px + 16px gap = 276px.
-  const containerWidth = window.innerWidth - 40;
-  let limit = Math.floor(containerWidth / 276);
-  if (limit < 1) limit = 1;
-  if (limit > 6) limit = 6;
+  let limit = 10;
 
-  state.allNews.slice(0, limit).forEach(n => {
+  filteredNews.slice(0, limit).forEach(n => {
     const card = document.createElement('div');
     card.className = 'news-card';
     card.onclick = () => {
@@ -162,6 +167,7 @@ function renderNews() {
     if (n.image) {
       const img = document.createElement('img');
       img.src = n.image;
+      img.onerror = () => img.remove();
       card.appendChild(img);
     }
     
@@ -171,6 +177,7 @@ function renderNews() {
     const title = document.createElement('div');
     title.className = 'news-title';
     title.textContent = n.title;
+    if (n.tintColor) title.style.color = n.tintColor;
     
     const caption = document.createElement('div');
     caption.className = 'news-caption';
@@ -194,16 +201,14 @@ function filterAndPrepare() {
   let result = state.allMerged;
 
   if (q) {
-     // Flatten versions for search
-    const flat = [];
-    state.allMerged.forEach(app => {
-      if (app.versions && app.versions.length) {
-        app.versions.forEach(v => flat.push({ ...app, ...v, _isVersion: true }));
-      } else {
-        flat.push({ ...app, _isVersion: true });
+    if (q.toLowerCase().startsWith('provider:')) {
+      const provider = q.substring(9).trim().toLowerCase();
+      if (provider) {
+        result = state.allMerged.filter(app => (app.dev || '').toLowerCase().includes(provider));
       }
-    });
-    result = searchApps(q, flat);
+    } else {
+      result = searchApps(q, state.allMerged);
+    }
   }
 
   // Sort helper
@@ -251,6 +256,22 @@ function buildCard(a) {
   const icon = document.createElement('img');
   icon.src = a.icon;
   icon.loading = 'lazy';
+  // Icon fallback logic
+  if (a.allIcons && a.allIcons.length > 1) {
+      icon.dataset.idx = 0;
+      icon.onerror = () => {
+          let idx = parseInt(icon.dataset.idx || '0') + 1;
+          if (idx < a.allIcons.length) {
+              // Try next icon
+              if (a.allIcons[idx] !== icon.src) { // Prevent loop if dupes
+                  icon.dataset.idx = idx;
+                  icon.src = a.allIcons[idx];
+              }
+          } else {
+             icon.onerror = null; // Stop
+          }
+      };
+  }
   
   const meta = document.createElement('div');
   meta.className = 'app-meta';
@@ -310,13 +331,5 @@ window.addEventListener('scroll', () => {
     ticking = false;
   });
 });
-
-function debounce(fn, ms) {
-  let id;
-  return (...a) => {
-    clearTimeout(id);
-    id = setTimeout(() => fn(...a), ms);
-  }
-}
 
 loadAll();

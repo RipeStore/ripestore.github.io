@@ -1,14 +1,14 @@
 // Fuse.js options for fuzzy searching
 const fuseOpts = {
   includeScore: true,
-  threshold: 0.26,
+  threshold: 0.35,
   ignoreLocation: true,
   minMatchCharLength: 2,
   useExtendedSearch: true,
   keys: [
-    { name: 'name', weight: 0.8 },
+    { name: 'name', weight: 1.5 },
     { name: 'subtitle', weight: 0.5 },
-    { name: 'desc', weight: 0.3 },
+    { name: 'desc', weight: 0.4 },
     { name: 'bundleIdentifier', weight: 0.2 }
   ]
 };
@@ -33,15 +33,8 @@ export function initSearch(apps) {
 export function addApps(apps) {
   if (!apps || !apps.length) return;
   apps.forEach(app => {
-    if (app.versions && app.versions.length) {
-      // Create a separate entry for each version of the app
-      app.versions.forEach(v => {
-        allApps.push({ ...app, ...v, _isVersion: true });
-      });
-    } else {
-      // If there are no versions, treat the app itself as a single entry
-      allApps.push({ ...app, _isVersion: true });
-    }
+      // Don't flatten versions. Treat the app as a single entity.
+      allApps.push(app);
   });
   if (!fuse) {
     fuse = new Fuse(allApps, fuseOpts);
@@ -66,14 +59,36 @@ export function searchApps(q, appsToSearch = allApps, limit = 50) {
 
   const raw = currentFuse.search(q, { limit: limit * 2 });
   const qLower = q.toLowerCase();
-  // Score and sort the results
+  
   const scored = raw.map(r => {
     const item = r.item;
+    const nameLower = (item.name || '').toLowerCase();
+    const descLower = (item.desc || '').toLowerCase();
+    const subLower = (item.subtitle || '').toLowerCase();
+    const bundleLower = (item.bundle || '').toLowerCase();
+    
+    // Base relevance from Fuse (1 is best for our 'rel', r.score is 0 best)
     let rel = 1 - (r.score ?? 1);
-    if (item.name && item.name.toLowerCase() === qLower) rel += 0.7;
-    else if (item.name && item.name.toLowerCase().startsWith(qLower)) rel += 0.4;
-    else if (item.name && item.name.toLowerCase().includes(qLower)) rel += 0.18;
+
+    // Manual Boosts - PRIORITIZE STRING CONTAINMENT
+    // This ensures items that actually contain the query rank higher than fuzzy approximations
+    
+    if (nameLower === qLower) {
+        rel += 10.0; // Exact Name
+    } else if (nameLower.startsWith(qLower)) {
+        rel += 5.0; // Name Starts With
+    } else if (nameLower.includes(qLower)) {
+        rel += 3.0; // Name Contains
+    } else if (subLower.includes(qLower)) {
+        rel += 2.0; // Subtitle Contains
+    } else if (descLower.includes(qLower)) {
+        rel += 1.5; // Description Contains
+    } else if (bundleLower.includes(qLower)) {
+        rel += 1.0; // Bundle Contains
+    }
+
     return { item, rel };
   }).sort((a, b) => b.rel - a.rel).slice(0, limit).map(r => r.item);
+  
   return scored;
 }
