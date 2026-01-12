@@ -1,0 +1,8 @@
+[
+{"title": "Install with Feather", "url": "feather://install/<ipaurl>"},
+{"title": "Install with Ksign", "url": "Ksign://install/<ipaurl>"},
+{"title": "Install with AltStore", "url": "altstore://install?<ipaurl>"},
+{"title": "Install with Scarlet", "url": "scarlet://install=<ipaurl>"},
+{"title": "Install with Sideloadly", "url": "sideloadly:<ipaurl>"}
+
+]

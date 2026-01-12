@@ -111,8 +111,16 @@ function render(app, initialVersion) {
   if (shots.length) {
     $('#screenshots-section').style.display = 'block';
     shotContainer.innerHTML = '';
-    shots.forEach(s => {
+    shots.forEach((s, idx) => {
       const img = document.createElement('img');
+      if (idx === 0) {
+        img.onload = () => {
+          const ratio = img.naturalWidth / img.naturalHeight;
+          shotContainer.style.setProperty('--screenshot-ratio', ratio);
+          // Update carousel buttons by triggering scroll listener
+          shotContainer.dispatchEvent(new Event('scroll'));
+        };
+      }
       img.src = s;
       shotContainer.appendChild(img);
     });
@@ -147,18 +155,130 @@ function render(app, initialVersion) {
   // Permissions Modal
   if (app.permissions?.length) {
     $('#perm-section').style.display = 'flex';
-    $('#perm-btn').onclick = () => {
+    $('#perm-btn').onclick = async () => {
       $('#perm-modal').style.display = 'flex';
       const list = $('#perm-list');
-      list.innerHTML = '';
-      app.permissions.forEach(p => {
-        const row = document.createElement('div');
-        row.className = 'perm-row';
-        row.innerHTML = `<strong>${p.name}</strong><p>${p.text}</p>`;
-        list.appendChild(row);
-      });
+      list.innerHTML = '<div style="padding:20px;text-align:center">Loading...</div>';
+      
+      try {
+        // Specialized fetcher to handle duplicate keys in flat-ish JSONs
+        const fetchMapping = async (url) => {
+          const res = await fetch(url, { cache: 'no-cache' });
+          if (!res.ok) return [];
+          const text = await res.text();
+          const pairs = [];
+          const regex = /"([^"]+)"\s*:\s*"([^"]+)"/g;
+          let m;
+          while ((m = regex.exec(text)) !== null) {
+            pairs.push({ key: m[1], val: m[2] });
+          }
+          return pairs;
+        };
+
+        const [entPairs, privPairs] = await Promise.all([
+          fetchMapping('assets/data/entitlements.json'),
+          fetchMapping('assets/data/privacy.json')
+        ]);
+
+        // Map: identifier (val) -> Array of friendly names (keys)
+        const fullMap = {};
+        const addMapping = (pairs) => {
+          pairs.forEach(({ key, val }) => {
+            if (!fullMap[val]) fullMap[val] = [];
+            if (!fullMap[val].includes(key)) fullMap[val].push(key);
+          });
+        };
+
+        addMapping(entPairs);
+        addMapping(privPairs);
+
+        list.innerHTML = '';
+        app.permissions.forEach(p => {
+          const names = fullMap[p.name];
+          const displayName = names ? names.join(' / ') : p.name;
+          
+          const row = document.createElement('div');
+          row.className = 'perm-row';
+          row.innerHTML = `<strong>${displayName}</strong><p>${p.text || ''}</p>`;
+          list.appendChild(row);
+        });
+      } catch (e) {
+        console.error('Failed to load permission maps', e);
+        // Fallback to raw names
+        list.innerHTML = '';
+        app.permissions.forEach(p => {
+          const row = document.createElement('div');
+          row.className = 'perm-row';
+          row.innerHTML = `<strong>${p.name}</strong><p>${p.text || ''}</p>`;
+          list.appendChild(row);
+        });
+      }
     };
     $('#close-perm').onclick = () => $('#perm-modal').style.display = 'none';
+  }
+
+  // Actions Modal
+  const actionsBtn = $('#btn-more-actions');
+  const actionsModal = $('#actions-modal');
+  const actionsList = $('#actions-list');
+  const closeActions = $('#close-actions');
+
+  if (actionsBtn && actionsModal) {
+    actionsBtn.onclick = async () => {
+      const ipaUrl = $('#hero-get').href;
+      try {
+        const actions = await fetchJSON('assets/data/actions.json');
+        actionsList.innerHTML = '';
+        actions.forEach(a => {
+          const item = document.createElement('a');
+          item.className = 'list-menu-item';
+          item.textContent = a.title;
+          item.href = a.url.replace('<ipaurl>', ipaUrl);
+          item.onclick = () => actionsModal.style.display = 'none';
+          actionsList.appendChild(item);
+        });
+        actionsModal.style.display = 'flex';
+      } catch (e) {
+        console.error('Failed to load actions', e);
+      }
+    };
+    closeActions.onclick = () => actionsModal.style.display = 'none';
+    window.addEventListener('click', (e) => {
+      if (e.target === actionsModal) actionsModal.style.display = 'none';
+      if (e.target === $('#perm-modal')) $('#perm-modal').style.display = 'none';
+    });
+  }
+
+  // Share functionality
+  const shareBtn = $('#btn-share');
+  if (shareBtn) {
+    shareBtn.onclick = async () => {
+      const verSel = $('#version-select');
+      const selectedVersion = verSel.value;
+      const shareUrl = new URL(window.location.href);
+      if (selectedVersion) {
+        shareUrl.searchParams.set('version', selectedVersion);
+      }
+      
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: app.name,
+            text: `Check out ${app.name} on RipeStore!`,
+            url: shareUrl.toString()
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') console.error('Error sharing:', err);
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(shareUrl.toString());
+          alert('Link copied to clipboard!');
+        } catch (err) {
+          console.error('Failed to copy:', err);
+        }
+      }
+    };
   }
 }
 

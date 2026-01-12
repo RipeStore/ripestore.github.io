@@ -27,7 +27,10 @@
         <p id="hero-subtitle"></p>
         <div class="actions">
           <a id="hero-get" class="btn-get" href="#">GET</a>
-          <button class="btn-icon">
+          <button id="btn-share" class="btn-icon" aria-label="Share">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+          </button>
+          <button id="btn-more-actions" class="btn-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
           </button>
         </div>
@@ -96,6 +99,17 @@
     </section>
 
   </main>
+
+  <!-- Actions Modal -->
+  <div id="actions-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Alternatives</h3>
+        <button id="close-actions" class="close-btn">&times;</button>
+      </div>
+      <div id="actions-list" class="modal-body list-menu"></div>
+    </div>
+  </div>
 
   <!-- Permissions Modal -->
   <div id="perm-modal" class="modal-overlay">
