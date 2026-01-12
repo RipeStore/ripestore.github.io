@@ -1,4 +1,4 @@
-import { $, qs, fetchJSON, ellipsize, parseDateString, formatDate, semverCompare, formatByteCount } from '../core/utils.js';
+import { $, qs, fetchJSON, ellipsize, parseDateString, formatDate, semverCompare, formatByteCount, linkify } from '../core/utils.js';
 import { normalizeRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 
@@ -131,7 +131,7 @@ function render(app, initialVersion) {
 
   // Description
   const descEl = $('#app-desc');
-  descEl.textContent = app.desc || "No description.";
+  descEl.innerHTML = linkify(app.desc || "No description.");
   
   // Handle "more" button
   const moreBtn = $('#desc-more-btn');
@@ -299,7 +299,7 @@ function updateVersionUI(sel, app) {
   
   if (notes && notes.length > 5) {
     whatsNew.style.display = 'block';
-    whatsNewText.textContent = notes;
+    whatsNewText.innerHTML = linkify(notes);
     
     // Reset state
     whatsNewText.classList.add('desc-clamped');

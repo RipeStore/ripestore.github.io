@@ -35,6 +35,19 @@ export async function fetchJSON(url) {
 }
 
 /**
+ * Converts URLs in text to clickable anchor tags.
+ */
+export function linkify(text) {
+  if (!text) return "";
+  // Escape HTML first
+  const div = document.createElement('div');
+  div.textContent = text;
+  const escaped = div.innerHTML;
+  // Replace URLs
+  return escaped.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" class="accent" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+/**
  * Truncates a string with an ellipsis.
  */
 export function ellipsize(s, n = 120) {
