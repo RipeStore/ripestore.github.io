@@ -383,74 +383,6 @@ export function mergeByBundle(apps) {
   const bundles = new Map();
   const noBundleApps = [];
 
-  const merge = (acc, a) => {
-      const verA = a.currentVersion || (a.versions && a.versions[0] && a.versions[0].version);
-      const verAcc = acc.currentVersion || (acc.versions && acc.versions[0] && acc.versions[0].version);
-      const dateA = parseDateString(a.versions && a.versions[0] && a.versions[0].date);
-      const dateAcc = parseDateString(acc.versions && acc.versions[0] && acc.versions[0].date);
-      
-      let useA = false;
-      if (dateA && dateAcc) {
-          useA = dateA > dateAcc;
-      } else if (verA && verAcc) {
-          useA = semverCompare(verA, verAcc) > 0;
-      }
-      
-      if (useA) {
-          acc.name = a.name || acc.name;
-          acc.dev = a.dev || acc.dev;
-          acc.desc = a.desc || acc.desc;
-          acc.subtitle = a.subtitle || acc.subtitle;
-          acc.tintColor = a.tintColor || acc.tintColor;
-          if (a.icon) acc.icon = a.icon;
-      } else {
-          acc.name = acc.name || a.name;
-          acc.dev = acc.dev || a.dev;
-          acc.desc = acc.desc || a.desc;
-          acc.subtitle = acc.subtitle || a.subtitle;
-          acc.tintColor = acc.tintColor || a.tintColor;
-          if (!acc.icon && a.icon) acc.icon = a.icon;
-      }
-      
-      if (!acc.allIcons) acc.allIcons = acc.icon ? [acc.icon] : [];
-      if (a.icon && !acc.allIcons.includes(a.icon)) {
-        acc.allIcons.push(a.icon);
-      }
-
-      const accHas = (acc.screenshots?.iphone?.length > 0) || (acc.screenshots?.ipad?.length > 0);
-      const aHas = (a.screenshots?.iphone?.length > 0) || (a.screenshots?.ipad?.length > 0);
-      if (!accHas && aHas) {
-        acc.screenshots = a.screenshots;
-      } else if (accHas && aHas && useA) {
-          acc.screenshots = a.screenshots;
-      } else {
-         acc.screenshots = acc.screenshots || a.screenshots;
-      }
-
-      if (a.permissions && a.permissions.length > 0) {
-          if (!acc.permissions || acc.permissions.length === 0 || useA) {
-              acc.permissions = a.permissions;
-          }
-      }
-
-      if (a.entitlements && a.entitlements.length > 0) {
-          if (!acc.entitlements || acc.entitlements.length === 0 || useA) {
-              acc.entitlements = a.entitlements;
-          }
-      }
-      
-      const seen = new Set(acc.versions.map(v => `${v.version}|${v.url}`));
-      for (const v of (a.versions || [])) {
-        const id = `${v.version}|${v.url}`;
-        if (!seen.has(id)) {
-          acc.versions.push(v);
-          seen.add(id);
-        }
-      }
-      
-      acc.seenSources.add(a.source);
-  };
-
   for (const a of apps) {
     if (!a.bundle) {
       noBundleApps.push(a);
@@ -462,24 +394,12 @@ export function mergeByBundle(apps) {
     }
 
     const buckets = bundles.get(a.bundle);
-    let placed = false;
-
-    for (const bucket of buckets) {
-      // Treat apps from different sources as separate buckets, 
-      // but merge versions if they are from the exact same source.
-      if (bucket.source === a.source) {
-        merge(bucket, a);
-        placed = true;
-        break;
-      }
-    }
-
-    if (!placed) {
-      const newEntry = { ...a, versions: [...(a.versions || [])] };
-      newEntry.seenSources = new Set([a.source]);
-      if (!newEntry.allIcons) newEntry.allIcons = newEntry.icon ? [newEntry.icon] : [];
-      buckets.push(newEntry);
-    }
+    
+    // Treat every app entry as a separate bucket to allow duplicate bundle IDs
+    const newEntry = { ...a, versions: [...(a.versions || [])] };
+    newEntry.seenSources = new Set([a.source]);
+    if (!newEntry.allIcons) newEntry.allIcons = newEntry.icon ? [newEntry.icon] : [];
+    buckets.push(newEntry);
   }
 
   // Second pass: Cross-bucket inheritance for icons/screenshots within the same bundle ID
