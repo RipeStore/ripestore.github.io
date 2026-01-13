@@ -1,118 +1,212 @@
-import { fetchJSON, semverCompare, parseDateString } from './utils.js';
+import { fetchJSON, semverCompare, parseDateString, db, hashString, cdnify } from './utils.js';
 import { getSources } from './sources.js';
+import { DEFAULTS as CFG } from './config.js';
 
 const CACHE_PREFIX = 'repo_cache_';
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+const NORM_PREFIX = 'norm_cache_';
+const CACHE_DURATION = CFG.CACHE_DURATION;
+const MASTER_CACHE_KEY = CFG.MASTER_CACHE_KEY;
 
 /**
  * Fetches and merges all configured repositories.
  */
 export async function fetchAllRepos() {
   const sources = getSources();
-  let allApps = [];
+  const now = Date.now();
+  
+  // 1. Try master cache
+  let master = await db.get(MASTER_CACHE_KEY);
+  if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
+    return master.data;
+  }
+
+  // 2. Fetch all and check for changes
+  const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
+  let anyChanged = !master || JSON.stringify(master.sources) !== JSON.stringify(sources);
+  
+  const allApps = [];
   let allNews = [];
   let featuredIds = [];
 
-  const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
-
-  results.forEach(res => {
+  for (let i = 0; i < results.length; i++) {
+    const res = results[i];
+    const src = sources[i];
     if (res.status === 'fulfilled') {
-      const out = res.value;
-      const normalized = normalizeRepo(out.data, out.url);
+      const { data, url, changed } = res.value;
+      
+      // Get normalized data (from cache if not changed)
+      let normalized = await db.get(NORM_PREFIX + src);
+      if (!normalized || changed) {
+        normalized = normalizeRepo(data, url);
+        await db.set(NORM_PREFIX + src, normalized);
+        anyChanged = true;
+      }
       
       if (normalized.news) allNews = allNews.concat(normalized.news);
       if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
-      
-      allApps = allApps.concat(normalized.apps);
+      allApps.push(...normalized.apps);
     }
-  });
+  }
 
+  // 3. If nothing changed, just refresh master timestamp
+  if (!anyChanged && master) {
+    master.timestamp = now;
+    await db.set(MASTER_CACHE_KEY, master);
+    return master.data;
+  }
+
+  // 4. Something changed, re-merge
   const mergedApps = mergeByBundle(allApps);
-  
   const appBundles = new Set(mergedApps.map(a => a.bundle));
-
-  // Deduplicate news
   const seenNews = new Set();
   const uniqueNews = [];
   allNews.forEach(n => {
-    // Filter out news for missing apps
     if (n.appID && !appBundles.has(n.appID)) return;
-
-    // Create a signature for the news item
-    // If identifier exists, use it. Otherwise use appID+Date or Title+Date
-    let sig = n.identifier;
-    if (!sig) {
-        const key = n.appID || n.title || 'unknown';
-        const date = n.date || 'nodate';
-        sig = `${key}|${date}`;
-    }
-    
+    let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
     if (!seenNews.has(sig)) {
       seenNews.add(sig);
       uniqueNews.push(n);
     }
   });
 
-  return {
-    apps: mergedApps,
-    news: uniqueNews,
-    featured: featuredIds
-  };
+  const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
+  await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: now });
+  return finalData;
 }
 
 /**
- * Fetches a repository JSON.
- * @param {string} src - The source URL or identifier.
- * @param {boolean} [force=false] - Whether to bypass the cache and force a network request.
+ * Streams repository data as it loads.
+ */
+export async function streamRepos(onUpdate, onComplete) {
+  const sources = getSources();
+  const now = Date.now();
+  
+  let master = await db.get(MASTER_CACHE_KEY);
+  if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
+    onUpdate({ ...master.data, progress: 1 });
+    if (onComplete) onComplete();
+    return;
+  }
+
+  let allApps = [];
+  let allNews = [];
+  let featuredIds = [];
+  let loadedCount = 0;
+  let anyChanged = !master || JSON.stringify(master?.sources) !== JSON.stringify(sources);
+
+  let lastUpdateTime = 0;
+  const UPDATE_THROTTLE = 500; 
+
+  const handleResult = async (res, src, isFinal = false) => {
+    loadedCount++;
+    if (res.status === 'fulfilled') {
+      const { data, url, changed } = res.value;
+      
+      let normalized = await db.get(NORM_PREFIX + src);
+      if (!normalized || changed) {
+        normalized = normalizeRepo(data, url);
+        await db.set(NORM_PREFIX + src, normalized);
+        anyChanged = true;
+      }
+      
+      if (normalized.news) allNews = allNews.concat(normalized.news);
+      if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
+      allApps.push(...normalized.apps);
+
+      const now = Date.now();
+      if (isFinal || (now - lastUpdateTime > UPDATE_THROTTLE)) {
+          lastUpdateTime = now;
+          
+          const mergedApps = mergeByBundle(allApps);
+          const appBundles = new Set(mergedApps.map(a => a.bundle));
+          const seenNews = new Set();
+          const uniqueNews = [];
+          allNews.forEach(n => {
+            if (n.appID && !appBundles.has(n.appID)) return;
+            let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
+            if (!seenNews.has(sig)) {
+              seenNews.add(sig);
+              uniqueNews.push(n);
+            }
+          });
+
+          const updateData = {
+            apps: mergedApps,
+            news: uniqueNews,
+            featured: featuredIds,
+            progress: (loadedCount / sources.length),
+            currentRepo: normalized.repoName || src
+          };
+
+          if (isFinal) {
+              const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
+              await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: Date.now() });
+          }
+
+          onUpdate(updateData);
+      } else {
+          onUpdate({ progress: (loadedCount / sources.length), currentRepo: normalized.repoName || src });
+      }
+    } else {
+        onUpdate({ progress: (loadedCount / sources.length) });
+    }
+  };
+
+  const CHUNK_SIZE = 8;
+  for (let i = 0; i < sources.length; i += CHUNK_SIZE) {
+    const chunk = sources.slice(i, i + CHUNK_SIZE);
+    const results = await Promise.allSettled(chunk.map(src => fetchRepo(src)));
+    for (let j = 0; j < results.length; j++) {
+        const isFinal = (i + j + 1) === sources.length;
+        await handleResult(results[j], chunk[j], isFinal);
+    }
+  }
+
+  if (onComplete) onComplete();
+}
+
+/**
+ * Fetches a repository JSON and checks for changes using content hashing.
  */
 export async function fetchRepo(src, force = false) {
   const cacheKey = CACHE_PREFIX + src;
   const now = Date.now();
+  const cached = await db.get(cacheKey);
 
-  if (!force) {
-    try {
-      const cachedStr = localStorage.getItem(cacheKey);
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr);
-        if (now - cached.timestamp < CACHE_DURATION) {
-          return cached.data;
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to read from cache', e);
-    }
+  if (!force && cached && (now - (cached.timestamp || 0)) < CACHE_DURATION) {
+    return { ...cached.data, changed: false };
   }
 
-  // If it doesn't have a protocol, assume it's a relative path in our github repo structure
-  const url = src.includes('://') ? src : `https://raw.githubusercontent.com/ripestore/repos/main/${src}.json`;
+  const url = src.includes('://') ? src : `${CFG.INTERNAL_REPO_BASE}${src}.json`;
+  
   try {
-    const data = await fetchJSON(url);
-    const result = { data, url };
+    const response = await fetch(url, { cache: 'no-cache' });
+    if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
     
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify({
-        timestamp: now,
-        data: result
-      }));
-    } catch (e) {
-      console.warn('Cache storage failed, possibly full. Clearing old cache...', e);
-      // Optional: Clear all repo caches and try again, or just ignore
-      try {
-        Object.keys(localStorage).forEach(key => {
-          if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
-        });
-        localStorage.setItem(cacheKey, JSON.stringify({
-          timestamp: now,
-          data: result
-        }));
-      } catch (retryErr) {
-        console.error('Cache write failed even after clear', retryErr);
-      }
+    const text = await response.text();
+    const hash = hashString(text);
+
+    if (cached && cached.hash === hash && !force) {
+      cached.timestamp = now;
+      await db.set(cacheKey, cached);
+      return { ...cached.data, changed: false };
     }
 
-    return result;
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      const m = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (!m) throw new Error("Invalid JSON payload");
+      data = JSON.parse(m[0]);
+    }
+
+    const result = { data, url };
+    await db.set(cacheKey, { timestamp: now, hash, data: result });
+    
+    return { ...result, changed: true };
   } catch (err) {
-    console.error(`Failed to fetch repo: ${url}`, err);
+    if (cached) return { ...cached.data, changed: false };
     throw err;
   }
 }
@@ -140,7 +234,7 @@ export function normalizeRepo(data, sourceUrl) {
           title: n.title,
           caption: n.caption,
           date: n.date,
-          image: n.imageURL,
+          image: cdnify(n.imageURL),
           url: n.url,
           appID: n.appID,
           identifier: n.identifier,
@@ -152,7 +246,7 @@ export function normalizeRepo(data, sourceUrl) {
       });
     }
     if (Array.isArray(data.featuredApps)) {
-       data.featuredApps.forEach(id => featured.push(id));
+       data.featuredApps.forEach(id => featured.push({ id, source: sourceUrl }));
     }
   } else if (data && typeof data === 'object') { // Scarlet-like
     Object.keys(data).forEach(k => {
@@ -169,8 +263,8 @@ function parseScreenshots(val) {
   const result = { iphone: [], ipad: [] };
   if (!val) return result;
   const add = (dest, item) => {
-    if (typeof item === 'string') dest.push(item);
-    else if (item && item.url) dest.push(item.url);
+    if (typeof item === 'string') dest.push(cdnify(item));
+    else if (item && item.url) dest.push(cdnify(item.url));
   };
   if (Array.isArray(val)) {
     val.forEach(v => add(result.iphone, v));
@@ -182,24 +276,51 @@ function parseScreenshots(val) {
 }
 
 function parsePermissions(val) {
+  if (!val) return null;
+  const privacy = (val && typeof val === 'object' && !Array.isArray(val) && val.privacy) ? val.privacy : val;
+  if (!privacy) return null;
+
   const perms = [];
-  if (!val) return perms;
-  const privacy = val.privacy || val;
   if (Array.isArray(privacy)) {
+    if (privacy.length === 0) return null;
     privacy.forEach(p => {
-      if (p.name) perms.push({ name: p.name, text: p.usageDescription || p.description || "" });
+      if (p && p.name) perms.push({ name: p.name, text: p.usageDescription || p.description || "" });
     });
-  } else if (typeof privacy === 'object') {
-    Object.entries(privacy).forEach(([k, v]) => {
+  } else if (privacy && typeof privacy === 'object') {
+    const entries = Object.entries(privacy);
+    if (entries.length === 0) return null;
+    entries.forEach(([k, v]) => {
       if (typeof v === 'string') perms.push({ name: k, text: v });
     });
   }
-  return perms;
+  return perms.length > 0 ? perms : null;
+}
+
+function parseEntitlements(val) {
+  if (!val) return null;
+  const data = (val && typeof val === 'object' && !Array.isArray(val) && val.entitlements) ? val.entitlements : val;
+  if (!data) return null;
+
+  const ents = [];
+  if (Array.isArray(data)) {
+    if (data.length === 0) return null;
+    data.forEach(e => {
+      if (typeof e === 'string') ents.push({ name: e, text: "" });
+      else if (e && e.name) ents.push({ name: e.name, text: e.usageDescription || e.description || "" });
+    });
+  } else if (data && typeof data === 'object') {
+    const entries = Object.entries(data);
+    if (entries.length === 0) return null;
+    entries.forEach(([k, v]) => {
+      ents.push({ name: k, text: typeof v === 'string' ? v : "" });
+    });
+  }
+  return ents.length > 0 ? ents : null;
 }
 
 function toUnified(o, sourceUrl, repoName) {
   const bundle = (o.bundleIdentifier || o.bundleID || o.bundle || o.id || "").trim();
-  const icon = o.iconURL || o.icon || o.image || "";
+  const icon = cdnify(o.iconURL || o.icon || o.image || "");
   const name = o.name || o.title || bundle || "Unknown";
   const dev = o.developerName || o.dev || o.developer || "";
   const desc = o.localizedDescription || o.description || o.subtitle || "";
@@ -210,7 +331,9 @@ function toUnified(o, sourceUrl, repoName) {
   const minOS = o.minOSVersion || null;
   
   const screenshots = parseScreenshots(o.screenshots || o.screenshotURLs);
-  const permissions = parsePermissions(o.appPermissions || o.permissions);
+  const appPerms = o.appPermissions || o.permissions;
+  const permissions = parsePermissions(appPerms);
+  const entitlements = parseEntitlements(o.entitlements);
 
   let versions = [];
   if (Array.isArray(o.versions) && o.versions.length) {
@@ -244,7 +367,7 @@ function toUnified(o, sourceUrl, repoName) {
 
   return {
     name, bundle, icon, dev, desc, subtitle, category,
-    tintColor, size, minOS, screenshots, permissions, versions,
+    tintColor, size, minOS, screenshots, permissions, entitlements, versions,
     source: sourceUrl,
     repoName,
     currentVersion,
@@ -261,7 +384,6 @@ export function mergeByBundle(apps) {
   const noBundleApps = [];
 
   const merge = (acc, a) => {
-      // Determine if 'a' is newer than 'acc'
       const verA = a.currentVersion || (a.versions && a.versions[0] && a.versions[0].version);
       const verAcc = acc.currentVersion || (acc.versions && acc.versions[0] && acc.versions[0].version);
       const dateA = parseDateString(a.versions && a.versions[0] && a.versions[0].date);
@@ -290,28 +412,31 @@ export function mergeByBundle(apps) {
           if (!acc.icon && a.icon) acc.icon = a.icon;
       }
       
-      // Merge icons list
       if (!acc.allIcons) acc.allIcons = acc.icon ? [acc.icon] : [];
       if (a.icon && !acc.allIcons.includes(a.icon)) {
         acc.allIcons.push(a.icon);
       }
 
-      // Intelligent screenshot merge
       const accHas = (acc.screenshots?.iphone?.length > 0) || (acc.screenshots?.ipad?.length > 0);
       const aHas = (a.screenshots?.iphone?.length > 0) || (a.screenshots?.ipad?.length > 0);
       if (!accHas && aHas) {
         acc.screenshots = a.screenshots;
       } else if (accHas && aHas && useA) {
-          // If both have screenshots, but 'a' is newer, maybe we should prefer 'a'?
-          // For now, let's just stick to the existing logic or maybe prefer 'a' if 'useA' is true
           acc.screenshots = a.screenshots;
       } else {
          acc.screenshots = acc.screenshots || a.screenshots;
       }
 
-      acc.permissions = acc.permissions || a.permissions;
-      if (useA && a.permissions && a.permissions.length > 0) {
-          acc.permissions = a.permissions;
+      if (a.permissions && a.permissions.length > 0) {
+          if (!acc.permissions || acc.permissions.length === 0 || useA) {
+              acc.permissions = a.permissions;
+          }
+      }
+
+      if (a.entitlements && a.entitlements.length > 0) {
+          if (!acc.entitlements || acc.entitlements.length === 0 || useA) {
+              acc.entitlements = a.entitlements;
+          }
       }
       
       const seen = new Set(acc.versions.map(v => `${v.version}|${v.url}`));
@@ -339,9 +464,10 @@ export function mergeByBundle(apps) {
     const buckets = bundles.get(a.bundle);
     let placed = false;
 
-    // Find a bucket that doesn't have this source yet
     for (const bucket of buckets) {
-      if (!bucket.seenSources.has(a.source)) {
+      // Treat apps from different sources as separate buckets, 
+      // but merge versions if they are from the exact same source.
+      if (bucket.source === a.source) {
         merge(bucket, a);
         placed = true;
         break;
@@ -353,6 +479,37 @@ export function mergeByBundle(apps) {
       newEntry.seenSources = new Set([a.source]);
       if (!newEntry.allIcons) newEntry.allIcons = newEntry.icon ? [newEntry.icon] : [];
       buckets.push(newEntry);
+    }
+  }
+
+  // Second pass: Cross-bucket inheritance for icons/screenshots within the same bundle ID
+  for (const buckets of bundles.values()) {
+    if (buckets.length > 1) {
+      // Find best icon and screenshots among all buckets for this bundle
+      let bestIcon = null;
+      let bestScreenshots = null;
+      const combinedIcons = new Set();
+      
+      for (const b of buckets) {
+        if (!bestIcon && b.icon) bestIcon = b.icon;
+        if (!bestScreenshots && (b.screenshots?.iphone?.length || b.screenshots?.ipad?.length)) {
+          bestScreenshots = b.screenshots;
+        }
+        if (b.allIcons) b.allIcons.forEach(i => combinedIcons.add(i));
+      }
+      
+      const sharedIcons = [...combinedIcons];
+      
+      if (bestIcon || bestScreenshots || sharedIcons.length > 0) {
+        for (const b of buckets) {
+          if (!b.icon) b.icon = bestIcon;
+          if (!b.screenshots || !(b.screenshots.iphone?.length || b.screenshots.ipad?.length)) {
+            b.screenshots = bestScreenshots;
+          }
+          // Merge all icons from same bundle ID for fallbacks
+          b.allIcons = sharedIcons;
+        }
+      }
     }
   }
 

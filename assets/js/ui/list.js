@@ -1,5 +1,6 @@
-import { $, qs, parseDateString } from '../core/utils.js';
-import { fetchAllRepos } from '../core/repo.js';
+import { $, qs, parseDateString, cdnify } from '../core/utils.js';
+import { streamRepos } from '../core/repo.js';
+import { removeSplash, buildAppCard, renderError } from './components.js';
 
 async function loadList() {
   const type = qs('type'); // 'featured' or 'news'
@@ -9,15 +10,46 @@ async function loadList() {
   }
   
   $('#list-title').textContent = type === 'featured' ? 'Featured' : 'Latest News';
-  $('#list-grid').innerHTML = 'Loading...';
+  
+  const splashStatus = $('#splash-status');
+  const splash = $('#splash');
 
-  const { apps, news, featured } = await fetchAllRepos();
+  let initialized = false;
+  let showTimeout = setTimeout(() => {
+    if (!initialized) finishLoading();
+  }, 4000);
 
-  if (type === 'featured') {
-    renderFeatured(apps, featured);
-  } else if (type === 'news') {
-    renderNews(news);
-  }
+  const finishLoading = () => {
+    if (initialized) return;
+    initialized = true;
+    clearTimeout(showTimeout);
+    removeSplash();
+  };
+
+  await streamRepos(
+    (data) => {
+      if (data.currentRepo && splashStatus) {
+        splashStatus.textContent = `Loading ${data.currentRepo}...`;
+      }
+      
+      if (data.apps && type === 'featured') {
+        renderFeatured(data.apps, data.featured);
+      } else if (data.news && type === 'news') {
+        renderNews(data.news, data.apps);
+      }
+
+      if (data.progress === 1) {
+          if ((type === 'featured' && (!data.featured || data.featured.length === 0)) ||
+              (type === 'news' && (!data.news || data.news.length === 0))) {
+            renderError($('main'), 'List Empty', `No ${type} items were found in your sources.`);
+          }
+          finishLoading();
+      }
+    },
+    () => {
+      finishLoading();
+    }
+  );
 }
 
 function renderFeatured(apps, ids) {
@@ -29,8 +61,20 @@ function renderFeatured(apps, ids) {
     return;
   }
   
-  const uniqueIds = [...new Set(ids)];
-  const featuredApps = uniqueIds.map(id => apps.find(a => a.bundle === id)).filter(Boolean);
+  const uniqueFeatured = [];
+  const seenFeatured = new Set();
+  ids.forEach(f => {
+    const key = typeof f === 'string' ? f : `${f.id}|${f.source}`;
+    if (!seenFeatured.has(key)) {
+      seenFeatured.add(key);
+      uniqueFeatured.push(f);
+    }
+  });
+
+  const featuredApps = uniqueFeatured.map(f => {
+    if (typeof f === 'string') return apps.find(a => a.bundle === f);
+    return apps.find(a => a.bundle === f.id && a.source === f.source);
+  }).filter(Boolean);
 
   if (!featuredApps.length) {
     grid.innerHTML = 'No featured apps found.';
@@ -38,46 +82,11 @@ function renderFeatured(apps, ids) {
   }
 
   featuredApps.forEach(a => {
-    const card = document.createElement('a');
-    card.className = 'app-item';
-    
-    const ver = a.currentVersion;
-    const verParam = ver ? `&version=${encodeURIComponent(ver)}` : '';
-    card.href = `app?bundle=${a.bundle}&repo=${a.source}${verParam}`;
-    
-    const icon = document.createElement('img');
-    icon.src = a.icon;
-    icon.loading = 'lazy';
-    
-    const meta = document.createElement('div');
-    meta.className = 'app-meta';
-    
-    const title = document.createElement('div');
-    title.className = 'app-name';
-    title.textContent = a.name;
-    
-    const sub = document.createElement('div');
-    sub.className = 'app-sub';
-    const subtitle = a.subtitle || a.desc || '';
-    const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
-    sub.textContent = parts.join(' • ');
-    
-    const btn = document.createElement('button');
-    btn.className = 'get-btn';
-    btn.textContent = 'GET';
-    
-    meta.appendChild(title);
-    meta.appendChild(sub);
-    
-    card.appendChild(icon);
-    card.appendChild(meta);
-    card.appendChild(btn);
-    
-    grid.appendChild(card);
+    grid.appendChild(buildAppCard(a));
   });
 }
 
-function renderNews(news) {
+function renderNews(news, allApps = []) {
   const grid = $('#list-grid');
   grid.innerHTML = '';
   
@@ -110,15 +119,27 @@ function renderNews(news) {
     card.className = 'news-card list-view';
     
     card.onclick = () => {
-      if (n.appID) location.href = `app?bundle=${n.appID}&repo=${n.source}`;
+      if (n.appID) {
+        const app = allApps.find(a => a.bundle === n.appID);
+        const nameParam = app ? `&name=${encodeURIComponent(app.name)}` : '';
+        location.href = `app?bundle=${n.appID}${nameParam}&repo=${n.source}`;
+      }
       else if (n.url) location.href = n.url;
     };
     
     if (n.image) {
       const img = document.createElement('img');
       img.src = n.image;
-      img.onerror = () => img.remove();
+      img.onerror = () => {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'news-placeholder';
+        img.replaceWith(placeholder);
+      };
       card.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'news-placeholder';
+      card.appendChild(placeholder);
     }
     
     const content = document.createElement('div');

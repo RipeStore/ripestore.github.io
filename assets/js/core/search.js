@@ -70,21 +70,36 @@ export function searchApps(q, appsToSearch = allApps, limit = 50) {
     // Base relevance from Fuse (1 is best for our 'rel', r.score is 0 best)
     let rel = 1 - (r.score ?? 1);
 
-    // Manual Boosts - PRIORITIZE STRING CONTAINMENT
-    // This ensures items that actually contain the query rank higher than fuzzy approximations
+    // Manual Boosts - PRIORITIZE SEQUENCE MATCHES
+    // We use large numbers to ensure these always outrank fuzzy-only matches.
     
     if (nameLower === qLower) {
-        rel += 10.0; // Exact Name
+        rel += 100.0; // Exact Name match (Highest priority)
     } else if (nameLower.startsWith(qLower)) {
-        rel += 5.0; // Name Starts With
+        rel += 50.0; // Name starts with query
     } else if (nameLower.includes(qLower)) {
-        rel += 3.0; // Name Contains
-    } else if (subLower.includes(qLower)) {
+        rel += 20.0; // Name contains the exact sequence anywhere
+        
+        // Extra boost if it matches at a word boundary (e.g., "The Hot Tub" for query "hot tub")
+        if (nameLower.includes(' ' + qLower)) {
+            rel += 10.0;
+        }
+    } else {
+        // Check if all words of query are present in name in any order
+        const qWords = qLower.split(/\s+/).filter(w => w.length > 1);
+        if (qWords.length > 1) {
+            const allMatch = qWords.every(w => nameLower.includes(w));
+            if (allMatch) {
+                rel += 5.0;
+            }
+        }
+    }
+
+    if (subLower.includes(qLower)) {
         rel += 2.0; // Subtitle Contains
-    } else if (descLower.includes(qLower)) {
-        rel += 1.5; // Description Contains
-    } else if (bundleLower.includes(qLower)) {
-        rel += 1.0; // Bundle Contains
+    }
+    if (bundleLower === qLower) {
+        rel += 10.0; // Exact Bundle ID
     }
 
     return { item, rel };

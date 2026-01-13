@@ -1,8 +1,10 @@
-import { $, fetchJSON, showToast } from '../core/utils.js';
+import { $, fetchJSON, showToast, setupModal } from '../core/utils.js';
 import { fetchRepo } from '../core/repo.js';
 import { getSources, setSources, getOrigins, setOrigins, addSource as coreAddSource, removeSource } from '../core/sources.js';
+import { removeSplash } from './components.js';
+import { DEFAULTS as CFG } from '../core/config.js';
 
-const SUGGESTIONS_URL = 'https://raw.githubusercontent.com/RipeStore/repos/refs/heads/main/ipa-repos.json';
+const SUGGESTIONS_URL = CFG.SUGGESTIONS_URL;
 
 let allSuggestions = [];
 
@@ -10,55 +12,77 @@ let selected = null;
 
 function render() {
   const box = $('#sourceList');
-  box.innerHTML = '';
-  getSources().forEach(url => {
-    const row = document.createElement('div');
-    row.className = 'info-row';
-    row.style.cursor = 'pointer';
-    
-    const val = document.createElement('div');
-    val.className = 'val';
-    val.textContent = url;
-    val.style.wordBreak = 'break-all';
-    
-    // Simple remove logic
-    if (selected === url) {
-        val.style.color = '#ff453a';
-        val.textContent = "Tap again to remove: " + url;
-    }
+  if (!box) return;
+  
+  const sources = getSources();
+  
+  // If box is empty, do a full render. 
+  // Otherwise, we just want to update states if we're just selecting.
+  if (box.children.length !== sources.length) {
+    box.innerHTML = '';
+    sources.forEach(url => {
+      const row = document.createElement('div');
+      row.className = 'info-row clickable';
+      row.dataset.url = url;
+      
+      const val = document.createElement('div');
+      val.className = 'val break-all';
+      
+      row.appendChild(val);
+      updateRowContent(row, url);
 
-    row.appendChild(val);
-
-    // Validate repo status and update name
-    if (selected !== url) {
-        fetchRepo(url).catch(() => {
-            val.style.color = '#ff453a';
-        }).then(res => {
-            if (res && res.data && res.data.name) {
-                // If not selected/removing, show name
-                if (selected !== url) {
-                   val.innerHTML = `<span style="font-weight:600">${res.data.name}</span><br><span style="font-size:12px;opacity:0.7">${url}</span>`;
-                }
-            }
-        });
-    }
-
-    row.onclick = (e) => {
-        e.stopPropagation();
-        if (selected === url) {
-            removeSource(url);
-            selected = null;
-            render();
-            return;
-        }
-        selected = url;
-        render();
-    };
-    
-    box.appendChild(row);
-  });
+      row.onclick = async (e) => {
+          e.stopPropagation();
+          const url = row.dataset.url;
+          if (selected === url) {
+              await removeSource(url);
+              selected = null;
+              render(); // Full render on removal is fine
+              return;
+          }
+          
+          // Deselect old
+          const old = box.querySelector(`[data-url="${selected}"]`);
+          selected = url;
+          if (old) updateRowContent(old, old.dataset.url);
+          
+          // Select new
+          updateRowContent(row, url);
+      };
+      
+      box.appendChild(row);
+    });
+  } else {
+    // Just refresh contents to reflect selection
+    Array.from(box.children).forEach(row => {
+        updateRowContent(row, row.dataset.url);
+    });
+  }
 
   renderSuggestions();
+}
+
+function updateRowContent(row, url) {
+    const val = row.querySelector('.val');
+    if (!val) return;
+
+    if (selected === url) {
+        val.classList.add('accent');
+        val.textContent = "Tap again to remove: " + url;
+        return;
+    }
+
+    val.classList.remove('accent');
+    // Show loading or cached name
+    val.innerHTML = `<span class="url-label">${url}</span>`;
+    
+    fetchRepo(url).then(res => {
+        if (res && res.data && res.data.name && selected !== url) {
+            val.innerHTML = `<span class="repo-name">${res.data.name}</span><br><span class="url-sublabel">${url}</span>`;
+        }
+    }).catch(() => {
+        if (selected !== url) val.classList.add('accent');
+    });
 }
 
 function renderSuggestions() {
@@ -66,8 +90,8 @@ function renderSuggestions() {
   
   // Add RipeStore to suggestions if not installed
   const suggestions = [...allSuggestions];
-  if (!list.includes('RipeStore') && !suggestions.some(s => s.name === 'RipeStore')) {
-      suggestions.unshift({ name: 'RipeStore', url: 'https://raw.githubusercontent.com/ripestore/repos/main/RipeStore.json' });
+  if (!list.includes(CFG.SOURCE_NAME) && !suggestions.some(s => s.name === CFG.SOURCE_NAME)) {
+      suggestions.unshift({ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL });
   }
 
   const available = suggestions.filter(r => !list.includes(r.name));
@@ -79,39 +103,25 @@ function renderSuggestions() {
   if (!section || !container) return;
 
   if (available.length === 0) {
-    section.style.display = 'none';
+    section.classList.add('hidden');
     return;
   }
 
-  section.style.display = 'block';
+  section.classList.remove('hidden');
   container.innerHTML = '';
 
   available.forEach(r => {
     const chip = document.createElement('div');
-    chip.style.cssText = `
-      background: var(--bg-secondary);
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid var(--separator);
-      color: var(--text-primary);
-      transition: background 0.2s;
-    `;
+    chip.className = 'chip';
     chip.textContent = r.name;
     chip.onclick = () => addSourceWrapper(r.name, 'suggested');
     
-    // Hover effect simulation
-    chip.onmouseover = () => { chip.style.background = 'var(--separator)'; };
-    chip.onmouseout = () => { chip.style.background = 'var(--bg-secondary)'; };
-
     container.appendChild(chip);
   });
 }
 
-function addSourceWrapper(v, type = 'manual') {
-  if (coreAddSource(v, type)) {
+async function addSourceWrapper(v, type = 'manual') {
+  if (await coreAddSource(v, type)) {
     render();
   }
 }
@@ -126,7 +136,7 @@ async function initSuggestions() {
       const list = getSources();
       const origins = getOrigins();
       const suggestionNames = new Set(data.map(d => d.name));
-      suggestionNames.add('RipeStore'); // Protect RipeStore
+      suggestionNames.add(CFG.SOURCE_NAME); // Protect RipeStore
 
       let changed = false;
       const newList = list.filter(src => {
@@ -139,7 +149,7 @@ async function initSuggestions() {
       });
 
       if (changed) {
-          setSources(newList);
+          await setSources(newList);
           setOrigins(origins);
           render();
       }
@@ -172,7 +182,7 @@ if (updateBtn) {
     const originalText = updateBtn.textContent;
     updateBtn.textContent = 'Updating...';
     updateBtn.disabled = true;
-    updateBtn.style.opacity = '0.5';
+    updateBtn.classList.add('disabled-btn');
     
     const list = getSources();
     await Promise.allSettled(list.map(url => fetchRepo(url, true)));
@@ -181,7 +191,7 @@ if (updateBtn) {
     
     updateBtn.textContent = originalText;
     updateBtn.disabled = false;
-    updateBtn.style.opacity = '1';
+    updateBtn.classList.remove('disabled-btn');
   });
 }
 
@@ -195,13 +205,15 @@ document.addEventListener('click', () => {
 render();
 initSuggestions();
 
+removeSplash();
+
 // --- Export / Import Logic ---
 
 function resolveSourcesToUrls() {
   const list = getSources();
   const suggestions = [...allSuggestions];
-  if (!suggestions.some(s => s.name === 'RipeStore')) {
-    suggestions.push({ name: 'RipeStore', url: 'https://raw.githubusercontent.com/ripestore/repos/main/RipeStore.json' });
+  if (!suggestions.some(s => s.name === CFG.SOURCE_NAME)) {
+    suggestions.push({ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL });
   }
 
   return list.map(src => {
@@ -209,7 +221,7 @@ function resolveSourcesToUrls() {
     const found = suggestions.find(s => s.name === src);
     if (found) return found.url;
     // Fallback to internal structure
-    return `https://raw.githubusercontent.com/ripestore/repos/main/${src}.json`;
+    return `${CFG.INTERNAL_REPO_BASE}${src}.json`;
   });
 }
 
@@ -254,20 +266,14 @@ const ioList = $('#io-list');
 const closeIo = $('#close-io');
 const importFileInput = $('#importFileInput');
 
-if (closeIo) closeIo.onclick = () => ioModal.style.display = 'none';
-if (ioModal) {
-    window.addEventListener('click', (e) => {
-        if (e.target === ioModal) ioModal.style.display = 'none';
-    });
-}
+setupModal(ioModal, closeIo);
 
 function showIoOption(label, onClick) {
     const item = document.createElement('div');
-    item.className = 'list-menu-item';
+    item.className = 'list-menu-item clickable';
     item.textContent = label;
-    item.style.cursor = 'pointer';
     item.onclick = () => {
-        ioModal.style.display = 'none';
+        ioModal.classList.remove('flex');
         onClick();
     };
     ioList.appendChild(item);
@@ -299,7 +305,7 @@ if (exportMenuBtn) {
         }
       });
       
-      ioModal.style.display = 'flex';
+      ioModal.classList.add('flex');
   };
 }
 
@@ -321,7 +327,7 @@ if (importMenuBtn) {
         }
       });
       
-      ioModal.style.display = 'flex';
+      ioModal.classList.add('flex');
   };
 }
 

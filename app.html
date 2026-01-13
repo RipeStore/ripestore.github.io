@@ -12,6 +12,14 @@
 </head>
 <body class="details-page">
 
+  <div id="splash">
+    <div class="splash-content">
+      <div class="splash-logo">RipeStore</div>
+      <div class="splash-loader"></div>
+      <div id="splash-status">Loading app details...</div>
+    </div>
+  </div>
+
   <nav class="navbar glass">
     <div class="nav-content">
       <a href="./" class="back-link">
@@ -52,7 +60,7 @@
         </div>
       </div>
       <p id="whats-new-text" class="text-body desc-clamped"></p>
-      <button id="whats-new-more-btn" class="more-btn" style="display:none">more</button>
+      <button id="whats-new-more-btn" class="more-btn hidden">more</button>
     </section>
 
     <!-- Screenshots -->
@@ -70,7 +78,7 @@
     <!-- Description -->
     <section class="section">
       <p id="app-desc" class="text-body desc-clamped"></p>
-      <button id="desc-more-btn" class="more-btn" style="display:none">more</button>
+      <button id="desc-more-btn" class="more-btn hidden">more</button>
     </section>
 
     <div class="separator"></div>
@@ -81,27 +89,31 @@
       <div class="info-list">
         <div class="info-row">
           <span class="label">Provider</span>
-          <span class="val" id="meta-provider"></span>
+          <span id="meta-provider" class="val"></span>
         </div>
         <div class="info-row">
           <span class="label">Size</span>
-          <span class="val" id="meta-size"></span>
+          <span id="meta-size" class="val"></span>
         </div>
         <div class="info-row">
           <span class="label">Compatibility</span>
-          <span class="val" id="meta-min-os"></span>
+          <span id="meta-min-os" class="val"></span>
         </div>
         <div class="info-row">
           <span class="label">Category</span>
-          <span class="val" id="meta-cat"></span>
+          <span id="meta-cat" class="val"></span>
         </div>
         <div class="info-row">
           <span class="label">Source</span>
-          <span class="val" id="meta-source-name"></span>
+          <span id="meta-source-name" class="val"></span>
         </div>
-        <div class="info-row" id="perm-section" style="display:none; cursor:pointer">
+        <div id="perm-section" class="info-row hidden clickable">
           <span class="label">Permissions</span>
-          <span class="val accent" id="perm-btn">View Details</span>
+          <span id="perm-btn" class="val accent">View Details</span>
+        </div>
+        <div id="ent-section" class="info-row hidden clickable">
+          <span class="label">Entitlements</span>
+          <span id="ent-btn" class="val accent">View Details</span>
         </div>
       </div>
     </section>
@@ -127,6 +139,17 @@
         <button id="close-perm" class="close-btn">&times;</button>
       </div>
       <div id="perm-list" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Entitlements Modal -->
+  <div id="ent-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>App Entitlements</h3>
+        <button id="close-ent" class="close-btn">&times;</button>
+      </div>
+      <div id="ent-list" class="modal-body"></div>
     </div>
   </div>
 

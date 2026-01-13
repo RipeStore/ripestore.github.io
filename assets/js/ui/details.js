@@ -1,88 +1,54 @@
-import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast } from '../core/utils.js';
+import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal } from '../core/utils.js';
 import { normalizeRepo, fetchRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
 import { getDominantColor, ensureContrast } from '../core/color.js';
+import { removeSplash, getSourceLabel, renderError } from './components.js';
 
 async function init() {
   const bundle = qs('bundle');
   const repo = qs('repo');
+  const nameParam = qs('name');
   const versionParam = qs('version');
   
   if (!bundle || !repo) {
-    $('#hero').innerHTML = '<div style="padding:20px;text-align:center">App not found</div>';
+    renderError($('main'), 'Missing Information', 'The link you followed is incomplete. Please try searching for the app instead.');
+    removeSplash();
     return;
   }
 
   let app = null;
 
-  // 1. Fast path: Fetch primary repo (likely cached)
+  // 1. Fast path: Fetch primary repo
   try {
     const primary = await fetchRepo(repo);
     const norm = normalizeRepo(primary.data, primary.url);
-    app = norm.apps.find(a => a.bundle === bundle);
+    
+    // Find by bundle AND name if available, otherwise just bundle
+    app = norm.apps.find(a => {
+      const matchBundle = a.bundle === bundle;
+      if (!nameParam) return matchBundle;
+      return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
+    });
     
     if (app) {
       // Sort versions initially
       sortVersions(app);
       render(app, versionParam);
+      removeSplash();
+      return;
     }
   } catch (e) {
     console.error('Primary repo fetch failed', e);
+    renderError($('main'), 'Connection Error', `Failed to load the repository: ${repo}. Please check your internet connection or the source URL.`);
+    removeSplash();
+    return;
   }
 
-  // 2. Background: Fetch other sources and merge
-  const others = getSources().filter(s => s !== repo);
-  if (others.length) {
-    const results = await Promise.allSettled(others.map(s => fetchRepo(s)));
-    let updated = false;
-
-    results.forEach(res => {
-      if (res.status === 'fulfilled') {
-        const norm = normalizeRepo(res.value.data, res.value.url);
-        const found = norm.apps.find(a => a.bundle === bundle);
-        if (found) {
-          if (!app) {
-             app = found;
-             if (!app.allIcons) app.allIcons = app.icon ? [app.icon] : [];
-             updated = true;
-          } else {
-             // Merge
-             if (!app.allIcons) app.allIcons = app.icon ? [app.icon] : [];
-             if (found.icon && !app.allIcons.includes(found.icon)) {
-                 app.allIcons.push(found.icon);
-             }
-             if (!app.icon && found.icon) { app.icon = found.icon; updated = true; }
-
-             const beforeCount = app.versions.length;
-             if (found.versions) app.versions = [...app.versions, ...found.versions];
-             
-             const appShots = (app.screenshots?.iphone?.length || 0) + (app.screenshots?.ipad?.length || 0);
-             const foundShots = (found.screenshots?.iphone?.length || 0) + (found.screenshots?.ipad?.length || 0);
-             
-             if (appShots === 0 && foundShots > 0) {
-               app.screenshots = found.screenshots;
-               updated = true;
-             }
-             
-             if (app.versions.length > beforeCount) updated = true;
-             
-             // Merge metadata if missing
-             if (!app.size && found.size) { app.size = found.size; updated = true; }
-             if (!app.minOS && found.minOS) { app.minOS = found.minOS; updated = true; }
-          }
-        }
-      }
-    });
-
-    if (updated && app) {
-      sortVersions(app);
-      render(app, versionParam);
-    }
-  }
-
+  // 2. Fallback: Search in other repos if not found in primary
   if (!app) {
-    $('#hero').innerHTML = 'Not Found';
+    renderError($('main'), 'App Not Found', `The app with bundle ID "<strong>${bundle}</strong>" could not be found in the specified repository.`);
+    removeSplash();
   }
 }
 
@@ -99,21 +65,6 @@ function sortVersions(app) {
   });
   app.versions = uniqVers.sort((a, b) => semverCompare(b.version, a.version));
 }
-
-function getSourceLabel(v) {
-  if (v.repoName) return v.repoName;
-  const src = v.source;
-  if (!src) return 'Unknown';
-  if (src.includes('ripestore/repos/main/')) {
-      const parts = src.split('/');
-      const file = parts[parts.length - 1];
-      return file.replace('.json', '');
-  }
-  if (src.includes('://')) {
-      try { return new URL(src).hostname; } catch(e) { return src; }
-  }
-  return src;
-};
 
 function render(app, initialVersion) {
   // Apply tint color logic
@@ -138,7 +89,7 @@ function render(app, initialVersion) {
       // Extract from hidden image to avoid CORS issues on display image
       const img = new Image();
       img.crossOrigin = "Anonymous";
-      img.src = app.icon;
+      img.src = cdnify(app.icon);
       img.onload = async () => {
           try {
               const col = await getDominantColor(img);
@@ -153,7 +104,7 @@ function render(app, initialVersion) {
   const heroTitle = $('#hero-title');
   const heroSub = $('#hero-subtitle');
   
-  heroIcon.src = app.icon;
+  heroIcon.src = cdnify(app.icon);
   if (app.allIcons && app.allIcons.length > 1) {
       heroIcon.dataset.idx = 0;
       heroIcon.onerror = () => {
@@ -161,7 +112,7 @@ function render(app, initialVersion) {
           if (idx < app.allIcons.length) {
               if (app.allIcons[idx] !== heroIcon.src) {
                   heroIcon.dataset.idx = idx;
-                  heroIcon.src = app.allIcons[idx];
+                  heroIcon.src = cdnify(app.allIcons[idx]);
               }
           } else {
              heroIcon.onerror = null;
@@ -231,13 +182,17 @@ function render(app, initialVersion) {
 }
 
 function renderHeavy(app) {
+  // Reset visibility
+  $('#perm-section').classList.add('hidden');
+  $('#ent-section').classList.add('hidden');
+
   // Screenshots
   const shotContainer = $('#screenshots-scroll');
   const shots = app.screenshots?.iphone?.length ? app.screenshots.iphone : (app.screenshots?.ipad || []);
   
   // Only render screenshots if not already populated to avoid flickering/resetting scroll
   if (shots.length && shotContainer.children.length === 0) {
-    $('#screenshots-section').style.display = 'block';
+    $('#screenshots-section').classList.remove('hidden');
     shotContainer.innerHTML = '';
     
     // Find first non-video image to determine aspect ratio
@@ -263,7 +218,7 @@ function renderHeavy(app) {
           iframe.src = videoData.embedUrl;
           iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
           iframe.allowFullscreen = true;
-          iframe.style.border = '0';
+          iframe.classList.add('screenshot-video');
           shotContainer.appendChild(iframe);
           // Trigger scroll check immediately if first item is video
           if (idx === 0) shotContainer.dispatchEvent(new Event('scroll'));
@@ -276,7 +231,7 @@ function renderHeavy(app) {
       img.onerror = () => {
         img.remove();
         if (shotContainer.children.length === 0) {
-          $('#screenshots-section').style.display = 'none';
+          $('#screenshots-section').classList.add('hidden');
         } else {
           shotContainer.dispatchEvent(new Event('scroll'));
         }
@@ -300,49 +255,29 @@ function renderHeavy(app) {
   const descEl = $('#app-desc');
   const moreBtn = $('#desc-more-btn');
   if (descEl.scrollHeight > descEl.clientHeight) {
-      moreBtn.style.display = 'inline-block';
+      moreBtn.classList.remove('hidden');
       moreBtn.onclick = () => {
         const isClamped = descEl.classList.toggle('desc-clamped');
         moreBtn.textContent = isClamped ? 'more' : 'less';
       };
   } else {
-      moreBtn.style.display = 'none';
+      moreBtn.classList.add('hidden');
   }
 
   // Permissions Modal Setup
-  if (app.permissions?.length) {
-    $('#perm-section').style.display = 'flex';
+  if (app.permissions && Array.isArray(app.permissions) && app.permissions.length > 0) {
+    $('#perm-section').classList.remove('hidden');
     $('#perm-btn').onclick = async () => {
-      $('#perm-modal').style.display = 'flex';
+      $('#perm-modal').classList.add('flex');
       const list = $('#perm-list');
-      // ... existing permission logic ...
-      list.innerHTML = '<div style="padding:20px;text-align:center">Loading...</div>';
+      list.innerHTML = '<div class="p-20 text-center">Loading...</div>';
       try {
-        const fetchMapping = async (url) => {
-          const res = await fetch(url, { cache: 'no-cache' });
-          if (!res.ok) return [];
-          const text = await res.text();
-          const pairs = [];
-          const regex = /"([^"]+)"\s*:\s*"([^"]+)"/g;
-          let m;
-          while ((m = regex.exec(text)) !== null) {
-            pairs.push({ key: m[1], val: m[2] });
-          }
-          return pairs;
-        };
-        const [entPairs, privPairs] = await Promise.all([
-          fetchMapping('assets/data/entitlements.json'),
-          fetchMapping('assets/data/privacy.json')
-        ]);
+        const privPairs = await fetchMapping('assets/data/privacy.json');
         const fullMap = {};
-        const addMapping = (pairs) => {
-          pairs.forEach(({ key, val }) => {
-            if (!fullMap[val]) fullMap[val] = [];
-            if (!fullMap[val].includes(key)) fullMap[val].push(key);
-          });
-        };
-        addMapping(entPairs);
-        addMapping(privPairs);
+        privPairs.forEach(({ key, val }) => {
+          if (!fullMap[val]) fullMap[val] = [];
+          if (!fullMap[val].includes(key)) fullMap[val].push(key);
+        });
 
         list.innerHTML = '';
         app.permissions.forEach(p => {
@@ -354,7 +289,7 @@ function renderHeavy(app) {
           list.appendChild(row);
         });
       } catch (e) {
-        console.error('Failed to load permission maps', e);
+        console.error('Failed to render permissions', e);
         list.innerHTML = '';
         app.permissions.forEach(p => {
           const row = document.createElement('div');
@@ -364,7 +299,49 @@ function renderHeavy(app) {
         });
       }
     };
-    $('#close-perm').onclick = () => $('#perm-modal').style.display = 'none';
+    $('#close-perm').onclick = () => $('#perm-modal').classList.remove('flex');
+  } else {
+    $('#perm-section').classList.add('hidden');
+  }
+
+  // Entitlements Modal Setup
+  if (app.entitlements && Array.isArray(app.entitlements) && app.entitlements.length > 0) {
+    $('#ent-section').classList.remove('hidden');
+    $('#ent-btn').onclick = async () => {
+      $('#ent-modal').classList.add('flex');
+      const list = $('#ent-list');
+      list.innerHTML = '<div class="p-20 text-center">Loading...</div>';
+      try {
+        const entPairs = await fetchMapping('assets/data/entitlements.json');
+        const fullMap = {};
+        entPairs.forEach(({ key, val }) => {
+          if (!fullMap[val]) fullMap[val] = [];
+          if (!fullMap[val].includes(key)) fullMap[val].push(key);
+        });
+
+        list.innerHTML = '';
+        app.entitlements.forEach(e => {
+          const names = fullMap[e.name];
+          const displayName = names ? names.join(' / ') : e.name;
+          const row = document.createElement('div');
+          row.className = 'perm-row';
+          row.innerHTML = `<strong>${displayName}</strong><p>${e.text || ''}</p>`;
+          list.appendChild(row);
+        });
+      } catch (e) {
+        console.error('Failed to render entitlements', e);
+        list.innerHTML = '';
+        app.entitlements.forEach(e => {
+          const row = document.createElement('div');
+          row.className = 'perm-row';
+          row.innerHTML = `<strong>${e.name}</strong><p>${e.text || ''}</p>`;
+          list.appendChild(row);
+        });
+      }
+    };
+    $('#close-ent').onclick = () => $('#ent-modal').classList.remove('flex');
+  } else {
+    $('#ent-section').classList.add('hidden');
   }
 
   // Actions Modal Setup
@@ -399,7 +376,7 @@ function renderHeavy(app) {
           item.className = 'list-menu-item';
           item.textContent = c.title;
           item.href = c.url.replace('<ipaurl>', ipaUrl);
-          item.onclick = () => actionsModal.style.display = 'none';
+          item.onclick = () => actionsModal.classList.remove('flex');
           item.style.color = 'var(--text-primary)';
           actionsList.appendChild(item);
       });
@@ -416,7 +393,7 @@ function renderHeavy(app) {
           item.className = 'list-menu-item';
           item.textContent = a.title;
           item.href = a.url.replace('<ipaurl>', ipaUrl);
-          item.onclick = () => actionsModal.style.display = 'none';
+          item.onclick = () => actionsModal.classList.remove('flex');
           actionsList.appendChild(item);
         });
       } catch (e) {
@@ -473,22 +450,18 @@ function renderHeavy(app) {
               listWrapper.appendChild(empty);
           }
 
-          allItems.forEach((item) => {
+      allItems.forEach((item) => {
               const row = document.createElement('div');
-              row.style.display = 'flex';
-              row.style.alignItems = 'center';
-              row.style.padding = '12px 16px';
-              row.style.borderBottom = '0.5px solid var(--separator)';
+              row.className = 'edit-row';
               
               const name = document.createElement('span');
               name.textContent = item.title;
-              name.style.flex = '1';
-              if (item.type === 'custom') name.style.fontWeight = '600';
+              name.className = 'flex-1';
+              if (item.type === 'custom') name.classList.add('bold');
               
               const del = document.createElement('button');
               del.textContent = 'Delete';
-              del.style.color = '#ff453a';
-              del.style.fontWeight = '500';
+              del.className = 'red bold';
               del.onclick = () => {
                   if (item.type === 'custom') {
                       const current = getCustomActions();
@@ -512,12 +485,8 @@ function renderHeavy(app) {
           // Reset Button (if any defaults hidden)
           if (hidden.length > 0) {
               const resetBtn = document.createElement('div');
+              resetBtn.className = 'reset-btn';
               resetBtn.textContent = 'Reset Default Alternatives';
-              resetBtn.style.padding = '12px';
-              resetBtn.style.textAlign = 'center';
-              resetBtn.style.color = 'var(--accent)';
-              resetBtn.style.fontSize = '14px';
-              resetBtn.style.cursor = 'pointer';
               resetBtn.onclick = () => {
                   setHiddenDefaults([]);
                   refreshList();
@@ -527,13 +496,13 @@ function renderHeavy(app) {
       };
 
       // Add New Form (Rendered once)
-      formWrapper.style.padding = '16px';
+      formWrapper.className = 'edit-form';
       formWrapper.innerHTML = `
-        <div style="margin-bottom:8px; font-weight:600; font-size:14px;">Add New</div>
-        <input id="new-act-title" placeholder="Title" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--separator); background:var(--bg-color); color:var(--text-primary); margin-bottom:8px;">
-        <input id="new-act-url" placeholder="URL (<ipaurl> as placeholder)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--separator); background:var(--bg-color); color:var(--text-primary); margin-bottom:8px;">
-        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">Use <code>&lt;ipaurl&gt;</code> to insert the IPA link.</div>
-        <button id="add-act-btn" style="width:100%; background:var(--accent); color:white; padding:8px; border-radius:8px; font-weight:600;">Add</button>
+        <div class="mb-8 bold text-small">Add New</div>
+        <input id="new-act-title" placeholder="Title" class="edit-input">
+        <input id="new-act-url" placeholder="URL (<ipaurl> as placeholder)" class="edit-input">
+        <div class="mb-8 text-secondary text-tiny">Use <code>&lt;ipaurl&gt;</code> to insert the IPA link.</div>
+        <button id="add-act-btn" class="btn-primary w-full">Add</button>
       `;
       
       const addBtn = formWrapper.querySelector('#add-act-btn');
@@ -569,13 +538,12 @@ function renderHeavy(app) {
     actionsBtn.dataset.setup = 'true';
     actionsBtn.onclick = async () => {
       await renderActionsList();
-      actionsModal.style.display = 'flex';
+      actionsModal.classList.add('flex');
     };
-    closeActions.onclick = () => actionsModal.style.display = 'none';
-    window.addEventListener('click', (e) => {
-      if (e.target === actionsModal) actionsModal.style.display = 'none';
-      if (e.target === $('#perm-modal')) $('#perm-modal').style.display = 'none';
-    });
+    
+    setupModal(actionsModal, closeActions);
+    setupModal($('#perm-modal'), $('#close-perm'));
+    setupModal($('#ent-modal'), $('#close-ent'));
   }
   
   // Share setup
@@ -616,30 +584,6 @@ function getVideoId(url) {
   if (m) return { type: 'dailymotion', embedUrl: `https://www.dailymotion.com/embed/video/${m[1]}` };
   
   return null;
-}
-
-function cdnify(url) {
-  if (!url || !url.startsWith('https://raw.githubusercontent.com/')) return url;
-  try {
-    const clean = url.replace('https://raw.githubusercontent.com/', '');
-    const parts = clean.split('/');
-    if (parts.length < 3) return url;
-    
-    const user = parts[0];
-    const repo = parts[1];
-    let branch = parts[2];
-    let pathParts = parts.slice(3);
-    
-    // Special handling for refs/heads which might appear in some raw urls constructed manually
-    if (branch === 'refs' && pathParts[0] === 'heads') {
-        branch = pathParts[1];
-        pathParts = pathParts.slice(2);
-    }
-    
-    return `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${pathParts.join('/')}`;
-  } catch (e) {
-    return url;
-  }
 }
 
 function updateVersionUI(sel, app) {

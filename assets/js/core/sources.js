@@ -1,8 +1,10 @@
 import { $ } from './utils.js';
+import { db } from './utils.js';
+import { DEFAULTS as CFG } from './config.js';
 
 const KEY = 'ripe_sources';
 const ORIGIN_KEY = 'ripe_source_origins';
-const DEFAULTS = ['RipeStore'];
+const DEFAULTS = [CFG.SOURCE_NAME];
 
 /**
  * Gets the list of configured source URLs.
@@ -15,8 +17,13 @@ export function getSources() {
 /**
  * Sets the list of configured source URLs.
  */
-export function setSources(arr) {
+export async function setSources(arr) {
   localStorage.setItem(KEY, JSON.stringify(arr));
+  try {
+    await db.remove('ripe_master_cache');
+    await db.remove('ripe_master_cache_v2');
+    await db.remove('ripe_master_cache_v3');
+  } catch (e) {}
 }
 
 /**
@@ -40,13 +47,13 @@ export function setOrigins(obj) {
  * @param {string} type - 'manual' or 'suggested'.
  * @returns {boolean} True if added, false if already exists.
  */
-export function addSource(url, type = 'manual') {
+export async function addSource(url, type = 'manual') {
   url = url.trim();
   if (!url) return false;
   const list = getSources();
   if (!list.includes(url)) {
     list.push(url);
-    setSources(list);
+    await setSources(list);
     
     const origins = getOrigins();
     origins[url] = type;
@@ -60,11 +67,11 @@ export function addSource(url, type = 'manual') {
  * Removes a source.
  * @param {string} url - Source URL.
  */
-export function removeSource(url) {
+export async function removeSource(url) {
   const list = getSources();
   const newList = list.filter(x => x !== url);
   if (newList.length !== list.length) {
-    setSources(newList);
+    await setSources(newList);
     const origins = getOrigins();
     delete origins[url];
     setOrigins(origins);

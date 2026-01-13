@@ -12,6 +12,14 @@
 </head>
 <body>
 
+  <div id="splash">
+    <div class="splash-content">
+      <div class="splash-logo">RipeStore</div>
+      <div class="splash-loader"></div>
+      <div id="splash-status">Loading sources...</div>
+    </div>
+  </div>
+
   <nav class="navbar glass">
     <div class="nav-content">
       <a href="./" class="back-link">
@@ -19,37 +27,37 @@
         Home
       </a>
       <div class="nav-brand">Sources</div>
-      <div style="width: 60px;"></div> <!-- spacer -->
+      <div class="w-60"></div> <!-- spacer -->
     </div>
   </nav>
 
   <main>
     <section class="section">
       <h2 class="section-title">Add Source</h2>
-      <div style="display: flex; gap: 10px;">
-        <input id="newSource" type="text" placeholder="https://example.com/repo.json" style="flex:1; padding: 10px; border-radius: 10px; border:none; background: var(--bg-secondary); color: var(--text-primary); font-size: 16px;">
-        <button id="addBtn" style="background: var(--accent); color: white; padding: 0 20px; border-radius: 10px; font-weight: 600;">Add</button>
+      <div class="flex gap-10">
+        <input id="newSource" type="text" placeholder="https://example.com/repo.json" class="input-main flex-1">
+        <button id="addBtn" class="btn-primary">Add</button>
       </div>
     </section>
 
-    <section class="section" id="suggestedSection" style="display: none;">
+    <section class="section hidden" id="suggestedSection">
       <h2 class="section-title">Suggested Repos</h2>
-      <div id="suggestedList" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
+      <div id="suggestedList" class="flex flex-wrap gap-10"></div>
     </section>
 
     <section class="section">
       <h2 class="section-title">Backup & Restore</h2>
-      <div style="display: flex; gap: 10px;">
-        <button id="exportMenuBtn" style="background: var(--bg-secondary); color: var(--accent); padding: 12px; border-radius: 12px; font-weight: 600; flex: 1; border: 1px solid var(--separator); display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <div class="flex gap-10">
+        <button id="exportMenuBtn" class="btn-secondary flex-1">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Export
         </button>
-        <button id="importMenuBtn" style="background: var(--bg-secondary); color: var(--accent); padding: 12px; border-radius: 12px; font-weight: 600; flex: 1; border: 1px solid var(--separator); display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <button id="importMenuBtn" class="btn-secondary flex-1">
            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
            Import
         </button>
       </div>
-      <input type="file" id="importFileInput" style="display: none;" accept=".txt,.json,.list">
+      <input type="file" id="importFileInput" class="hidden" accept=".txt,.json,.list">
     </section>
 
     <!-- IO Modal -->
@@ -66,11 +74,11 @@
     </div>
 
     <section class="section">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h2 class="section-title" style="margin: 0;">My Sources</h2>
-        <button id="updateBtn" style="color: var(--accent); font-weight: 600; font-size: 15px;">Update Repos</button>
+      <div class="flex justify-between items-center mb-16">
+        <h2 class="section-title m-0">My Sources</h2>
+        <button id="updateBtn" class="btn-text">Update Repos</button>
       </div>
-      <div id="sourceList" class="info-list" style="background: var(--bg-secondary); padding: 0 16px; border-radius: var(--radius-l);"></div>
+      <div id="sourceList" class="info-list source-list-container"></div>
     </section>
   </main>
 

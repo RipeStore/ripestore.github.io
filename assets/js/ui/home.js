@@ -1,7 +1,8 @@
-import { $, ellipsize, parseDateString, qs, debounce } from '../core/utils.js';
-import { fetchAllRepos } from '../core/repo.js';
-import { initSearch, addApps, searchApps } from '../core/search.js';
+import { $, ellipsize, parseDateString, qs, debounce, cdnify } from '../core/utils.js';
+import { streamRepos } from '../core/repo.js';
+import { initSearch, searchApps } from '../core/search.js';
 import { initCarousel } from '../core/carousel.js';
+import { removeSplash, buildAppCard, renderError } from './components.js';
 
 const BATCH = 24;
 
@@ -12,7 +13,8 @@ const state = {
   list: [],
   rendered: 0,
   q: '',
-  sort: 'name-asc'
+  sort: 'date-desc',
+  initialized: false
 };
 
 async function loadAll() {
@@ -20,21 +22,53 @@ async function loadAll() {
   state.allNews = [];
   state.featuredIds = [];
   
-  $('#app-grid').innerHTML = '';
+  const splashStatus = $('#splash-status');
+  const splash = $('#splash');
+
   showSkeleton();
 
-  const { apps, news, featured } = await fetchAllRepos();
-  
-  state.allMerged = apps;
-  state.allNews = news;
-  state.featuredIds = featured;
+  let showTimeout = setTimeout(() => {
+    if (!state.initialized && state.allMerged.length > 0) {
+       finishLoading();
+    }
+  }, 4000); // Max 4 seconds on splash if we have some data
 
-  addApps(state.allMerged);
-  
-  renderFeatured();
-  renderNews();
+  const finishLoading = () => {
+    if (state.initialized) return;
+    state.initialized = true;
+    clearTimeout(showTimeout);
+    
+    renderFeatured();
+    renderNews();
+    initSearch(state.allMerged);
+    filterAndPrepare();
 
-  initSearch(state.allMerged);
+    if (state.allMerged.length === 0) {
+      renderError($('main'), 'Failed to Load Apps', 'We couldn\'t load any apps from your sources. Please check your internet connection or manage your sources.');
+    }
+
+    removeSplash();
+  };
+
+  await streamRepos(
+    (data) => {
+      if (data.apps) state.allMerged = data.apps;
+      if (data.news) state.allNews = data.news;
+      if (data.featured) state.featuredIds = data.featured;
+      
+      if (data.currentRepo && splashStatus) {
+        splashStatus.textContent = `Loading ${data.currentRepo}...`;
+      }
+
+      if (data.progress === 1) {
+          finishLoading();
+      }
+    },
+    () => {
+      finishLoading();
+      console.log('All repositories loaded');
+    }
+  );
 
   // Check for search query param
   const urlQ = qs('q');
@@ -44,30 +78,55 @@ async function loadAll() {
     if (input) input.value = urlQ;
     $('#featured-section')?.classList.add('collapsed');
     $('#news-section')?.classList.add('collapsed');
+    filterAndPrepare();
   }
-
-  filterAndPrepare();
 }
 
 function showSkeleton() {
-  const c = $('#app-grid');
-  c.innerHTML = '';
-  // Simple skeleton logic
+  const grid = $('#app-grid');
+  if (!grid || grid.children.length > 0) return;
+  
+  grid.innerHTML = '';
+  for (let i = 0; i < 12; i++) {
+    const skel = document.createElement('div');
+    skel.className = 'app-item skeleton';
+    skel.innerHTML = `
+      <div class="skel-icon"></div>
+      <div class="skel-meta">
+        <div class="skel-line title"></div>
+        <div class="skel-line sub"></div>
+      </div>
+      <div class="skel-btn"></div>
+    `;
+    grid.appendChild(skel);
+  }
 }
 
 function renderFeatured() {
   const container = $('#featured-section');
   const grid = $('#featured-grid');
   if (!state.featuredIds.length) {
-    if (container) container.style.display = 'none';
+    container?.classList.add('hidden');
     return;
   }
   
-  const uniqueIds = [...new Set(state.featuredIds)];
-  const featuredApps = uniqueIds.map(id => state.allMerged.find(a => a.bundle === id)).filter(Boolean);
+  const uniqueFeatured = [];
+  const seenFeatured = new Set();
+  state.featuredIds.forEach(f => {
+    const key = typeof f === 'string' ? f : `${f.id}|${f.source}`;
+    if (!seenFeatured.has(key)) {
+      seenFeatured.add(key);
+      uniqueFeatured.push(f);
+    }
+  });
+
+  const featuredApps = uniqueFeatured.map(f => {
+    if (typeof f === 'string') return state.allMerged.find(a => a.bundle === f);
+    return state.allMerged.find(a => a.bundle === f.id && a.source === f.source);
+  }).filter(Boolean);
 
   if (!featuredApps.length) {
-    if (container) container.style.display = 'none';
+    container?.classList.add('hidden');
     return;
   }
 
@@ -82,12 +141,12 @@ function renderFeatured() {
   featuredApps.slice(0, limit).forEach(a => {
     const card = document.createElement('a');
     card.className = 'featured-card';
-    card.href = `app?bundle=${a.bundle}&repo=${a.source}`;
+    card.href = `app?bundle=${a.bundle}&name=${encodeURIComponent(a.name)}&repo=${a.source}`;
     
     // Background image if available (using icon as fallback blurred maybe? or just standard style)
     // For now standard style
     const icon = document.createElement('img');
-    icon.src = a.icon;
+    icon.src = cdnify(a.icon);
     icon.className = 'featured-icon';
     
     const info = document.createElement('div');
@@ -100,8 +159,8 @@ function renderFeatured() {
     const sub = document.createElement('div');
     sub.className = 'featured-subtitle';
     const ver = a.currentVersion;
-    const subtitle = a.subtitle || a.desc || 'Featured App';
-    const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
+    const subText = a.subtitle || a.desc || 'Featured App';
+    const parts = [ver, ellipsize(subText, 45)].filter(p => p && p.trim().length > 0);
     sub.textContent = parts.join(' • ');
     
     info.appendChild(title);
@@ -112,7 +171,7 @@ function renderFeatured() {
     grid.appendChild(card);
   });
   if (container) {
-    container.style.display = 'block';
+    container.classList.remove('hidden');
     // Initialize carousel buttons
     const wrapper = container.querySelector('.carousel-container');
     if (wrapper) initCarousel(wrapper);
@@ -123,7 +182,7 @@ function renderNews() {
   const container = $('#news-section');
   const grid = $('#news-grid');
   if (!state.allNews.length) {
-    if (container) container.style.display = 'none';
+    container?.classList.add('hidden');
     return;
   }
   
@@ -160,15 +219,27 @@ function renderNews() {
     const card = document.createElement('div');
     card.className = 'news-card';
     card.onclick = () => {
-      if (n.appID) location.href = `app?bundle=${n.appID}&repo=${n.source}`;
+      if (n.appID) {
+        const app = state.allMerged.find(a => a.bundle === n.appID);
+        const nameParam = app ? `&name=${encodeURIComponent(app.name)}` : '';
+        location.href = `app?bundle=${n.appID}${nameParam}&repo=${n.source}`;
+      }
       else if (n.url) location.href = n.url;
     };
     
     if (n.image) {
       const img = document.createElement('img');
-      img.src = n.image;
-      img.onerror = () => img.remove();
+      img.src = cdnify(n.image);
+      img.onerror = () => {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'news-placeholder';
+        img.replaceWith(placeholder);
+      };
       card.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'news-placeholder';
+      card.appendChild(placeholder);
     }
     
     const content = document.createElement('div');
@@ -190,7 +261,7 @@ function renderNews() {
     grid.appendChild(card);
   });
   if (container) {
-    container.style.display = 'block';
+    container.classList.remove('hidden');
     const wrapper = container.querySelector('.carousel-container');
     if (wrapper) initCarousel(wrapper);
   }
@@ -211,23 +282,34 @@ function filterAndPrepare() {
     }
   }
 
-  // Sort helper
-  const getDate = (app) => {
-    // Get latest version date or app date
-    const dStr = (app.versions && app.versions[0] && app.versions[0].date) || app.date;
-    const d = parseDateString(dStr);
-    return d ? d.getTime() : 0;
-  };
+  // If sort is relevance and we are searching, searchApps already sorted it.
+  // If not searching, relevance is same as date-desc.
+  if (state.sort === 'relevance' && !q) {
+     state.sort = 'date-desc';
+     const sel = $('#sort-select');
+     if (sel) sel.value = 'date-desc';
+  }
 
-  if (state.sort === 'date-desc') {
-    result.sort((a, b) => getDate(b) - getDate(a));
-  } else if (state.sort === 'date-asc') {
-    result.sort((a, b) => getDate(a) - getDate(b));
-  } else if (state.sort === 'name-desc') {
-    result.sort((a, b) => b.name.localeCompare(a.name));
+  if (state.sort === 'relevance') {
+    // Keep search order
   } else {
-    // Default name-asc
-    result.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort helper
+    const getDate = (app) => {
+      const dStr = (app.versions && app.versions[0] && app.versions[0].date) || app.date;
+      const d = parseDateString(dStr);
+      return d ? d.getTime() : 0;
+    };
+
+    if (state.sort === 'date-desc') {
+      result.sort((a, b) => getDate(b) - getDate(a));
+    } else if (state.sort === 'date-asc') {
+      result.sort((a, b) => getDate(a) - getDate(b));
+    } else if (state.sort === 'name-desc') {
+      result.sort((a, b) => b.name.localeCompare(a.name));
+    } else {
+      // Default name-asc
+      result.sort((a, b) => a.name.localeCompare(b.name));
+    }
   }
 
   state.list = result;
@@ -240,66 +322,9 @@ function appendBatch() {
   const grid = $('#app-grid');
   const next = Math.min(state.rendered + BATCH, state.list.length);
   for (let i = state.rendered; i < next; i++) {
-    grid.appendChild(buildCard(state.list[i]));
+    grid.appendChild(buildAppCard(state.list[i]));
   }
   state.rendered = next;
-}
-
-function buildCard(a) {
-  const card = document.createElement('a');
-  card.className = 'app-item';
-  
-  const ver = a._isVersion ? a.version : a.currentVersion;
-  const verParam = ver ? `&version=${encodeURIComponent(ver)}` : '';
-  card.href = `app?bundle=${a.bundle}&repo=${a.source}${verParam}`;
-  
-  const icon = document.createElement('img');
-  icon.src = a.icon;
-  icon.loading = 'lazy';
-  // Icon fallback logic
-  if (a.allIcons && a.allIcons.length > 1) {
-      icon.dataset.idx = 0;
-      icon.onerror = () => {
-          let idx = parseInt(icon.dataset.idx || '0') + 1;
-          if (idx < a.allIcons.length) {
-              // Try next icon
-              if (a.allIcons[idx] !== icon.src) { // Prevent loop if dupes
-                  icon.dataset.idx = idx;
-                  icon.src = a.allIcons[idx];
-              }
-          } else {
-             icon.onerror = null; // Stop
-          }
-      };
-  }
-  
-  const meta = document.createElement('div');
-  meta.className = 'app-meta';
-  
-  const title = document.createElement('div');
-  title.className = 'app-name';
-  title.textContent = a.name;
-  
-  const sub = document.createElement('div');
-  sub.className = 'app-sub';
-  
-  const subtitle = a.subtitle || a.dev || '';
-  
-  const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
-  sub.textContent = parts.join(' • ');
-  
-  const btn = document.createElement('button');
-  btn.className = 'get-btn';
-  btn.textContent = 'GET';
-  
-  meta.appendChild(title);
-  meta.appendChild(sub);
-  
-  card.appendChild(icon);
-  card.appendChild(meta);
-  card.appendChild(btn);
-  
-  return card;
 }
 
 // Event Listeners
@@ -316,6 +341,16 @@ $('#search-input').addEventListener('input', e => {
   const isSearching = state.q.trim().length > 0;
   $('#featured-section').classList.toggle('collapsed', isSearching);
   $('#news-section').classList.toggle('collapsed', isSearching);
+
+  if (isSearching && state.sort !== 'relevance') {
+      state.sort = 'relevance';
+      const sel = $('#sort-select');
+      if (sel) sel.value = 'relevance';
+  } else if (!isSearching && state.sort === 'relevance') {
+      state.sort = 'date-desc';
+      const sel = $('#sort-select');
+      if (sel) sel.value = 'date-desc';
+  }
 
   debounce(filterAndPrepare, 300)();
 });

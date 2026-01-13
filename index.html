@@ -13,6 +13,14 @@
 </head>
 <body>
 
+  <div id="splash">
+    <div class="splash-content">
+      <div class="splash-logo">RipeStore</div>
+      <div class="splash-loader"></div>
+      <div id="splash-status">Initializing...</div>
+    </div>
+  </div>
+
   <nav class="navbar">
     <div class="nav-content">
       <div class="nav-brand">RipeStore</div>
@@ -59,9 +67,10 @@
         <h2 class="section-title">Apps</h2>
         <div class="sort-picker">
           <select id="sort-select">
+            <option value="relevance">Relevance</option>
+            <option value="date-desc" selected>Newest</option>
             <option value="name-asc">Name (A-Z)</option>
             <option value="name-desc">Name (Z-A)</option>
-            <option value="date-desc">Newest</option>
             <option value="date-asc">Oldest</option>
           </select>
         </div>
