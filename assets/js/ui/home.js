@@ -148,6 +148,19 @@ function renderFeatured() {
     const icon = document.createElement('img');
     icon.src = cdnify(a.icon);
     icon.className = 'featured-icon';
+
+    icon.dataset.idx = 0;
+    icon.onerror = () => {
+      const all = a.allIcons || [];
+      let idx = parseInt(icon.dataset.idx || '0') + 1;
+      if (idx < all.length) {
+        icon.dataset.idx = idx;
+        icon.src = cdnify(all[idx]);
+      } else {
+        icon.onerror = null;
+        icon.src = 'assets/img/placeholder.png';
+      }
+    };
     
     const info = document.createElement('div');
     info.className = 'featured-info';

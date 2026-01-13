@@ -105,20 +105,18 @@ function render(app, initialVersion) {
   const heroSub = $('#hero-subtitle');
   
   heroIcon.src = cdnify(app.icon);
-  if (app.allIcons && app.allIcons.length > 1) {
-      heroIcon.dataset.idx = 0;
-      heroIcon.onerror = () => {
-          let idx = parseInt(heroIcon.dataset.idx || '0') + 1;
-          if (idx < app.allIcons.length) {
-              if (app.allIcons[idx] !== heroIcon.src) {
-                  heroIcon.dataset.idx = idx;
-                  heroIcon.src = cdnify(app.allIcons[idx]);
-              }
-          } else {
-             heroIcon.onerror = null;
-          }
-      };
-  }
+  heroIcon.dataset.idx = 0;
+  heroIcon.onerror = () => {
+      const all = app.allIcons || [];
+      let idx = parseInt(heroIcon.dataset.idx || '0') + 1;
+      if (idx < all.length) {
+          heroIcon.dataset.idx = idx;
+          heroIcon.src = cdnify(all[idx]);
+      } else {
+          heroIcon.onerror = null;
+          heroIcon.src = 'assets/img/placeholder.png';
+      }
+  };
 
   heroTitle.textContent = app.name;
   document.title = app.name;

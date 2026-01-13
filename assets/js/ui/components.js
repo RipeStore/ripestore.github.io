@@ -27,20 +27,18 @@ export function buildAppCard(app) {
   icon.loading = 'lazy';
   icon.className = 'app-icon';
 
-  if (app.allIcons && app.allIcons.length > 1) {
-    icon.dataset.idx = 0;
-    icon.onerror = () => {
-      let idx = parseInt(icon.dataset.idx || '0') + 1;
-      if (idx < app.allIcons.length) {
-        if (app.allIcons[idx] !== icon.src) {
-          icon.dataset.idx = idx;
-          icon.src = cdnify(app.allIcons[idx]);
-        }
-      } else {
-        icon.onerror = null;
-      }
-    };
-  }
+  icon.dataset.idx = 0;
+  icon.onerror = () => {
+    const all = app.allIcons || [];
+    let idx = parseInt(icon.dataset.idx || '0') + 1;
+    if (idx < all.length) {
+      icon.dataset.idx = idx;
+      icon.src = cdnify(all[idx]);
+    } else {
+      icon.onerror = null;
+      icon.src = 'assets/img/placeholder.png';
+    }
+  };
 
   const meta = document.createElement('div');
   meta.className = 'app-meta';
