@@ -45,7 +45,14 @@ export function initCarousel(container) {
     requestAnimationFrame(updateState);
   });
   
-  // Initial check
-  setTimeout(updateState, 100);
+  // Initial check and layout monitoring
+  const observer = new ResizeObserver(() => {
+    updateState();
+  });
+  observer.observe(row);
+
+  // Monitor images loading inside the row to update buttons if aspect-ratios shift
+  row.addEventListener('load', updateState, true);
+
   window.addEventListener('resize', updateState);
 }
