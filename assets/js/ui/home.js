@@ -76,6 +76,8 @@ async function loadAll() {
     state.q = urlQ;
     const input = $('#search-input');
     if (input) input.value = urlQ;
+    const clearBtn = $('#search-clear');
+    if (clearBtn) clearBtn.classList.remove('hidden');
     $('#featured-section')?.classList.add('collapsed');
     $('#news-section')?.classList.add('collapsed');
     filterAndPrepare();
@@ -172,8 +174,9 @@ function renderFeatured() {
     const sub = document.createElement('div');
     sub.className = 'featured-subtitle';
     const ver = a.currentVersion;
+    const sourceName = a.repoName || getSourceLabel({ source: a.source });
     const subText = a.subtitle || a.desc || 'Featured App';
-    const parts = [ver, ellipsize(subText, 45)].filter(p => p && p.trim().length > 0);
+    const parts = [ver, sourceName, ellipsize(subText, 45)].filter(p => p && p.trim().length > 0);
     sub.textContent = parts.join(' • ');
     
     info.appendChild(title);
@@ -352,6 +355,10 @@ $('#search-input').addEventListener('input', e => {
   state.q = e.target.value;
   
   const isSearching = state.q.trim().length > 0;
+  
+  const clearBtn = $('#search-clear');
+  if (clearBtn) clearBtn.classList.toggle('hidden', state.q.length === 0);
+
   $('#featured-section').classList.toggle('collapsed', isSearching);
   $('#news-section').classList.toggle('collapsed', isSearching);
 
@@ -367,6 +374,18 @@ $('#search-input').addEventListener('input', e => {
 
   debounce(filterAndPrepare, 300)();
 });
+
+const clearBtn = $('#search-clear');
+if (clearBtn) {
+  clearBtn.addEventListener('click', () => {
+    const input = $('#search-input');
+    if (input) {
+      input.value = '';
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    }
+  });
+}
 
 let ticking = false;
 window.addEventListener('scroll', () => {

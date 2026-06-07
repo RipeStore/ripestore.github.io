@@ -300,9 +300,20 @@ export function showToast(msg, duration = 2000) {
  * Converts raw GitHub URLs to jsDelivr CDN URLs.
  */
 export function cdnify(url) {
-  if (!url || !url.startsWith('https://raw.githubusercontent.com/')) return url;
+  if (typeof url !== 'string') return url;
+  
+  let cleanUrl = url.trim();
+  
+  // Handle github.com/.../raw/... URLs
+  if (cleanUrl.toLowerCase().startsWith('https://github.com/') && cleanUrl.includes('/raw/')) {
+    cleanUrl = cleanUrl.replace(/https:\/\/github\.com\//i, 'https://raw.githubusercontent.com/').replace(/\/raw\//i, '/');
+  }
+
+  if (!cleanUrl.toLowerCase().startsWith('https://raw.githubusercontent.com/')) return url;
+  
   try {
-    const clean = url.replace('https://raw.githubusercontent.com/', '');
+    // Strip the protocol and domain
+    const clean = cleanUrl.substring(cleanUrl.indexOf('raw.githubusercontent.com/') + 26);
     const parts = clean.split('/');
     if (parts.length < 3) return url;
     
@@ -317,7 +328,11 @@ export function cdnify(url) {
         pathParts = pathParts.slice(2);
     }
     
-    return `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${pathParts.join('/')}`;
+    // Remove query params or hashes (jsDelivr rejects these)
+    let pathStr = pathParts.join('/');
+    pathStr = pathStr.split('?')[0].split('#')[0];
+    
+    return `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${pathStr}`;
   } catch (e) {
     return url;
   }
@@ -331,3 +346,22 @@ if ('serviceWorker' in navigator) {
     }
   });
 }
+
+/**
+ * Handle graceful restoration from bfcache (Back-Forward Cache).
+ * Mobile browsers (especially iOS Safari) aggressively unload images from memory 
+ * to save resources when navigating away. When returning via the back button, 
+ * the DOM is restored but images may remain invisible. 
+ * This forces unloaded images to safely re-render.
+ */
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    document.querySelectorAll('img').forEach(img => {
+      // If the image has a src but its decoded bitmap was evicted (naturalWidth is 0)
+      if (img.src && img.naturalWidth === 0) {
+        // Re-assigning the src forcefully wakes up the browser's image decoder
+        img.src = img.src;
+      }
+    });
+  }
+});

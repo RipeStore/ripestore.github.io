@@ -51,7 +51,8 @@ export function buildAppCard(app) {
   sub.className = 'app-sub';
   
   const subtitle = app.subtitle || app.dev || '';
-  const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
+  const sourceName = app.repoName || getSourceLabel({ source: app.source });
+  const parts = [ver, sourceName, subtitle].filter(p => p && p.trim().length > 0);
   sub.textContent = parts.join(' • ');
   
   const btn = document.createElement('button');

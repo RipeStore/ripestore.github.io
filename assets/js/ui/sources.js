@@ -66,22 +66,31 @@ function updateRowContent(row, url) {
     const val = row.querySelector('.val');
     if (!val) return;
 
-    if (selected === url) {
-        val.classList.add('accent');
-        val.textContent = "Tap again to remove: " + url;
-        return;
-    }
+    const renderState = (name) => {
+        if (selected === url) {
+            val.classList.add('accent');
+            val.innerHTML = `<span class="repo-name">Tap again to remove</span><br><span class="url-sublabel">${name ? name + ' - ' : ''}${url}</span>`;
+        } else {
+            val.classList.remove('accent');
+            if (name) {
+                val.innerHTML = `<span class="repo-name">${name}</span><br><span class="url-sublabel">${url}</span>`;
+            } else {
+                val.innerHTML = `<span class="repo-name" style="visibility:hidden">Unknown</span><br><span class="url-sublabel">${url}</span>`;
+            }
+        }
+    };
 
-    val.classList.remove('accent');
     // Show loading or cached name
-    val.innerHTML = `<span class="url-label">${url}</span>`;
+    if (!val.innerHTML.includes('<br>')) {
+        renderState('');
+    }
     
     fetchRepo(url).then(res => {
-        if (res && res.data && res.data.name && selected !== url) {
-            val.innerHTML = `<span class="repo-name">${res.data.name}</span><br><span class="url-sublabel">${url}</span>`;
-        }
+        const name = (res && res.data && res.data.name) ? res.data.name : '';
+        renderState(name);
     }).catch(() => {
         if (selected !== url) val.classList.add('accent');
+        renderState('');
     });
 }
 

@@ -221,7 +221,10 @@ export function normalizeRepo(data, sourceUrl) {
   const repoName = data.name || null;
 
   const push = (o) => {
-    if (o && (o.bundleIdentifier || o.bundleID || o.bundle || o.id)) apps.push(toUnified(o, sourceUrl, repoName));
+    if (o && (o.bundleIdentifier || o.bundleID || o.bundle || o.id)) {
+      if (o.marketplaceID && typeof o.marketplaceID === 'string' && o.marketplaceID.trim() !== "") return;
+      apps.push(toUnified(o, sourceUrl, repoName));
+    }
   };
 
   if (Array.isArray(data)) {
@@ -321,7 +324,9 @@ function parseEntitlements(val) {
 function toUnified(o, sourceUrl, repoName) {
   const bundle = (o.bundleIdentifier || o.bundleID || o.bundle || o.id || "").trim();
   const icon = cdnify(o.iconURL || o.icon || o.image || "");
-  const name = o.name || o.title || bundle || "Unknown";
+  let name = o.name || o.title || bundle || "Unknown";
+  if (!name || name.trim() === "") name = "Unknown";
+  if (bundle.endsWith("Beta")) name += " (BETA)";
   const dev = o.developerName || o.dev || o.developer || "";
   const desc = o.localizedDescription || o.description || o.subtitle || "";
   const subtitle = o.subtitle || "";
@@ -390,20 +395,30 @@ export function mergeByBundle(apps) {
     }
 
     if (!bundles.has(a.bundle)) {
-      bundles.set(a.bundle, []);
+      bundles.set(a.bundle, new Map());
     }
 
-    const buckets = bundles.get(a.bundle);
+    const sourceMap = bundles.get(a.bundle);
     
-    // Treat every app entry as a separate bucket to allow duplicate bundle IDs
-    const newEntry = { ...a, versions: [...(a.versions || [])] };
-    newEntry.seenSources = new Set([a.source]);
-    if (!newEntry.allIcons) newEntry.allIcons = newEntry.icon ? [newEntry.icon] : [];
-    buckets.push(newEntry);
+    // Treat multiple instances of a same bundleid in the same repo as same app
+    if (!sourceMap.has(a.source)) {
+      const newEntry = { ...a, versions: [...(a.versions || [])] };
+      if (!newEntry.allIcons) newEntry.allIcons = newEntry.icon ? [newEntry.icon] : [];
+      sourceMap.set(a.source, newEntry);
+    } else {
+      const existing = sourceMap.get(a.source);
+      if (a.versions && a.versions.length) {
+         existing.versions.push(...a.versions);
+      }
+      if (a.icon && !existing.allIcons.includes(a.icon)) {
+         existing.allIcons.push(a.icon);
+      }
+    }
   }
 
   // Second pass: Cross-bucket inheritance for icons/screenshots within the same bundle ID
-  for (const buckets of bundles.values()) {
+  for (const sourceMap of bundles.values()) {
+    const buckets = Array.from(sourceMap.values());
     if (buckets.length > 1) {
       // Find best icon and screenshots among all buckets for this bundle
       let bestIcon = null;
@@ -434,21 +449,38 @@ export function mergeByBundle(apps) {
   }
 
   const result = [...noBundleApps];
-  for (const group of bundles.values()) {
-    result.push(...group);
+  for (const sourceMap of bundles.values()) {
+    result.push(...sourceMap.values());
   }
 
   for (const v of result) {
-    if (v.seenSources) delete v.seenSources;
     if (Array.isArray(v.versions)) {
       v.versions.sort((x, y) => {
+        // Prioritize semantic versioning first
+        const sv = semverCompare(y.version, x.version);
+        if (sv !== 0) return sv;
+        
+        // Fallback to date if versions are identical
         const dx = parseDateString(x.date);
         const dy = parseDateString(y.date);
         if (dx && dy) return dy - dx;
         if (dx) return -1;
         if (dy) return 1;
-        return semverCompare(y.version, x.version);
+        return 0;
       });
+      
+      // Deduplicate versions by version string to avoid identical dropdown items
+      const uniqueVers = [];
+      const seenVers = new Set();
+      for (const ver of v.versions) {
+         const k = ver.version + ver.url;
+         if (!seenVers.has(k)) {
+            seenVers.add(k);
+            uniqueVers.push(ver);
+         }
+      }
+      v.versions = uniqueVers;
+      
       if (v.versions.length > 0) {
         v.currentVersion = v.versions[0].version;
       }

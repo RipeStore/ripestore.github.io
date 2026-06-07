@@ -209,44 +209,81 @@ function renderHeavy(app) {
 
     shotContainer.scrollLeft = 0; // Reset scroll position
 
-    shots.forEach((s, idx) => {
-      const videoData = getVideoId(s);
-      if (videoData) {
-          const iframe = document.createElement('iframe');
-          iframe.src = videoData.embedUrl;
-          iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
-          iframe.allowFullscreen = true;
-          iframe.classList.add('screenshot-video');
-          shotContainer.appendChild(iframe);
-          // Trigger scroll check immediately if first item is video
-          if (idx === 0) shotContainer.dispatchEvent(new Event('scroll'));
-          return;
-      }
-    
-      const img = document.createElement('img');
-      img.loading = 'lazy'; 
+    const renderShots = () => {
+      // Aggressively disable scrolling features during DOM insertion to prevent WebKit panicking
+      shotContainer.style.overflowX = 'hidden';
+      shotContainer.style.scrollSnapType = 'none';
       
-      img.onerror = () => {
-        img.remove();
-        if (shotContainer.children.length === 0) {
-          $('#screenshots-section').classList.add('hidden');
-        } else {
-          shotContainer.dispatchEvent(new Event('scroll'));
-        }
-      };
+      const fragment = document.createDocumentFragment();
 
-      if (idx === firstImageIdx) {
-        img.onload = () => {
-          const ratio = img.naturalWidth / img.naturalHeight;
-          shotContainer.style.setProperty('--screenshot-ratio', ratio);
-          shotContainer.dispatchEvent(new Event('scroll'));
+      shots.forEach((s, idx) => {
+        const videoData = getVideoId(s);
+        if (videoData) {
+            const iframe = document.createElement('iframe');
+            iframe.src = videoData.embedUrl;
+            iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+            iframe.allowFullscreen = true;
+            iframe.classList.add('screenshot-video');
+            fragment.appendChild(iframe);
+            return;
+        }
+      
+        const img = document.createElement('img');
+        img.loading = 'lazy'; 
+        
+        img.onerror = () => {
+          img.remove();
+          if (shotContainer.children.length === 0) {
+            $('#screenshots-section').classList.add('hidden');
+          } else {
+            shotContainer.dispatchEvent(new Event('scroll'));
+          }
         };
-      }
-      img.src = cdnify(s);
-      shotContainer.appendChild(img);
-    });
-    const wrapper = $('#screenshots-section .carousel-container');
-    if (wrapper) initCarousel(wrapper);
+
+        img.src = cdnify(s);
+        fragment.appendChild(img);
+      });
+      
+      // Append all items in a single synchronous DOM operation
+      shotContainer.appendChild(fragment);
+      
+      const wrapper = $('#screenshots-section .carousel-container');
+      if (wrapper) initCarousel(wrapper);
+
+      // Force browser layout recalculation
+      shotContainer.offsetHeight;
+      shotContainer.scrollLeft = 0;
+
+      // Restore scrolling incrementally to bypass Safari's eager-snapping bugs
+      setTimeout(() => {
+        shotContainer.style.overflowX = '';
+        shotContainer.scrollLeft = 0;
+        
+        requestAnimationFrame(() => {
+          shotContainer.style.scrollSnapType = '';
+          shotContainer.scrollLeft = 0;
+          shotContainer.dispatchEvent(new Event('scroll'));
+        });
+      }, 50);
+    };
+
+    if (firstImageIdx !== -1) {
+        const preImg = new Image();
+        preImg.onload = () => {
+             const ratio = preImg.naturalWidth / preImg.naturalHeight;
+             shotContainer.style.setProperty('--screenshot-ratio', ratio);
+             if (ratio > 1) {
+                 shotContainer.classList.add('is-landscape');
+             } else {
+                 shotContainer.classList.add('is-portrait');
+             }
+             renderShots();
+        };
+        preImg.onerror = renderShots;
+        preImg.src = cdnify(shots[firstImageIdx]);
+    } else {
+        renderShots();
+    }
   }
   
   // Handle "more" button for Description
@@ -599,8 +636,11 @@ function updateVersionUI(sel, app) {
   const whatsNewText = $('#whats-new-text');
   const whatsNewMoreBtn = $('#whats-new-more-btn');
   
+  whatsNew.style.display = 'block';
+  whatsNew.classList.remove('hidden');
+
   if (notes && notes.length > 5) {
-    whatsNew.style.display = 'block';
+    whatsNewText.style.display = 'block';
     whatsNewText.innerHTML = linkify(notes);
     
     // Reset state
@@ -620,7 +660,8 @@ function updateVersionUI(sel, app) {
       }
     });
   } else {
-    whatsNew.style.display = 'none';
+    whatsNewText.style.display = 'none';
+    whatsNewMoreBtn.style.display = 'none';
   }
 
   // Update Metadata

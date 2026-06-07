@@ -17,14 +17,20 @@ export function initCarousel(container) {
     return 340;
   };
 
-  const updateButtons = () => {
+  const updateState = () => {
     // Show/hide based on scroll position with tolerance
-    left.classList.toggle('hidden', row.scrollLeft <= 5);
+    const isAtStart = row.scrollLeft <= 5;
     
     // Check if we can scroll right
     // scrollWidth might be slightly larger due to sub-pixel rendering
     const maxScroll = row.scrollWidth - row.clientWidth;
-    right.classList.toggle('hidden', row.scrollLeft >= maxScroll - 5);
+    const isAtEnd = row.scrollLeft >= maxScroll - 5;
+    
+    left.classList.toggle('hidden', isAtStart);
+    right.classList.toggle('hidden', isAtEnd);
+
+    container.classList.toggle('mask-left', !isAtStart);
+    container.classList.toggle('mask-right', !isAtEnd);
   };
 
   left.onclick = () => {
@@ -36,13 +42,10 @@ export function initCarousel(container) {
   };
 
   row.addEventListener('scroll', () => {
-    // Debounce slightly or just run
-    requestAnimationFrame(updateButtons);
+    requestAnimationFrame(updateState);
   });
   
   // Initial check
-  // Need to wait for layout?
-  setTimeout(updateButtons, 100);
-  // Also on window resize
-  window.addEventListener('resize', updateButtons);
+  setTimeout(updateState, 100);
+  window.addEventListener('resize', updateState);
 }

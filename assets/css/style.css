@@ -117,7 +117,7 @@ button {
 }
 
 .nav-content {
-  max-width: 1000px;
+  max-width: 1400px;
   margin: 0 auto;
   height: 52px;
   display: flex;
@@ -136,16 +136,42 @@ button {
   flex: 1;
   margin: 0 16px;
   min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .nav-search input {
   background: var(--bg-secondary);
   border: 0.5px solid var(--separator);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 8px 32px 8px 12px;
   color: var(--text-primary);
   font-size: 14px;
   width: 100%;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--bg-color);
+  opacity: 0.8;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.search-clear:active {
+  transform: scale(0.9);
+}
+
+.search-clear.hidden {
+  display: none;
 }
 
 .nav-links a {
@@ -216,16 +242,12 @@ main {
 }
 
 @media (min-width: 768px) {
-  .carousel-container {
-    padding: 0 50px;
-  }
-
   .scroll-btn.left {
-    left: 0;
+    left: 32px;
   }
 
   .scroll-btn.right {
-    right: 0;
+    right: 32px;
   }
 }
 
@@ -261,11 +283,11 @@ main {
 }
 
 .scroll-btn.left {
-  left: -22px;
+  left: 16px;
 }
 
 .scroll-btn.right {
-  right: -22px;
+  right: 16px;
 }
 
 .scroll-btn.hidden {
@@ -297,6 +319,23 @@ main {
   scrollbar-width: none;
   /* Firefox */
   scroll-behavior: smooth;
+  transition: mask-image 0.3s, -webkit-mask-image 0.3s;
+}
+
+/* Dynamic Fading Edges */
+.carousel-container.mask-left.mask-right .scroll-row:not(.screenshots-row) {
+  mask-image: linear-gradient(to right, transparent, black 100px, black calc(100% - 100px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 100px, black calc(100% - 100px), transparent);
+}
+
+.carousel-container.mask-left:not(.mask-right) .scroll-row:not(.screenshots-row) {
+  mask-image: linear-gradient(to right, transparent, black 100px);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 100px);
+}
+
+.carousel-container.mask-right:not(.mask-left) .scroll-row:not(.screenshots-row) {
+  mask-image: linear-gradient(to left, transparent, black 100px);
+  -webkit-mask-image: linear-gradient(to left, transparent, black 100px);
 }
 
 .scroll-row::-webkit-scrollbar {
@@ -440,10 +479,13 @@ main {
   cursor: pointer;
 }
 
-.news-card.list-view img {
+.news-card.list-view img,
+.news-card.list-view .news-placeholder {
   width: 100%;
   height: 280px;
   object-fit: cover;
+  flex-grow: 1;
+  flex-shrink: 1;
 }
 
 .news-card.list-view .news-content {
@@ -800,6 +842,11 @@ main {
 /* If we want expansion logic, we need JS toggling a class */
 
 /* Screenshots */
+.screenshots-row {
+  padding: 0 var(--pad);
+  scroll-padding: var(--pad);
+}
+
 .screenshots-row img,
 .screenshots-row iframe {
   height: 380px;
@@ -812,13 +859,29 @@ main {
   border: 0.5px solid var(--separator);
 }
 
+.screenshots-row.is-landscape {
+  scroll-padding: 0; /* Let center snapping handle it */
+}
+
+.screenshots-row.is-landscape img,
+.screenshots-row.is-landscape iframe {
+  width: 600px;
+  max-width: 80vw;
+  height: auto;
+  scroll-snap-align: center;
+}
+
 @media (max-width: 600px) {
   .screenshots-row img,
   .screenshots-row iframe {
-    height: auto;
-    max-height: 320px;
+    height: 320px;
     width: auto;
-    max-width: 85vw;
+  }
+
+  .screenshots-row.is-landscape img,
+  .screenshots-row.is-landscape iframe {
+    width: 85vw;
+    height: auto;
   }
 }
 
