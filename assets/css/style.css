@@ -1028,6 +1028,55 @@ main {
   width: 100%;
 }
 
+.input-minimal {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  width: 100%;
+}
+
+/* SwiftUI Inset Grouped Lists */
+.page-grouped {
+  background: var(--bg-color); /* The page background stays the base color */
+}
+
+.list-group {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.list-group .info-row {
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--separator);
+  margin: 0;
+}
+
+.list-group .info-row:last-child {
+  border-bottom: none;
+}
+
+.list-group-header {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 6px 16px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.px-16 {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.mb-24 {
+  margin-bottom: 24px;
+}
+
 .btn-primary {
   background: var(--accent);
   color: white;
@@ -1073,18 +1122,6 @@ main {
 .chip:hover {
   background: var(--separator);
 }
-
-.source-list-container {
-
-  background: var(--bg-secondary);
-
-  padding: 0 16px;
-
-  border-radius: var(--radius-l);
-
-}
-
-
 
 .break-all { word-break: break-all; }
 

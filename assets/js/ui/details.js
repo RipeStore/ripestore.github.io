@@ -130,7 +130,8 @@ function render(app, initialVersion) {
   app.versions.forEach(v => {
     const opt = document.createElement('option');
     opt.value = v.version;
-    opt.textContent = `${v.version} (${formatDate(v.date)})`;
+    const dateStr = formatDate(v.date);
+    opt.textContent = dateStr ? `${v.version} (${dateStr})` : v.version;
     opt.dataset.url = v.url;
     opt.dataset.notes = v.notes;
     opt.dataset.size = v.size || '';
@@ -190,9 +191,8 @@ function renderHeavy(app) {
   
   // Only render screenshots if not already populated to avoid flickering/resetting scroll
   if (shots.length && shotContainer.children.length === 0) {
-    $('#screenshots-section').classList.remove('hidden');
     shotContainer.innerHTML = '';
-    
+
     // Find first non-video image to determine aspect ratio
     let firstImageIdx = -1;
     for (let i = 0; i < shots.length; i++) {
@@ -245,7 +245,10 @@ function renderHeavy(app) {
       });
       
       // Append all items in a single synchronous DOM operation
-      shotContainer.appendChild(fragment);
+      if (fragment.children.length > 0) {
+        $('#screenshots-section').classList.remove('hidden');
+        shotContainer.appendChild(fragment);
+      }
       
       const wrapper = $('#screenshots-section .carousel-container');
       if (wrapper) initCarousel(wrapper);

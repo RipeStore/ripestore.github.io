@@ -332,6 +332,7 @@ function filterAndPrepare() {
   state.rendered = 0;
   $('#app-grid').innerHTML = '';
   appendBatch();
+  window.scrollTo(0, 0);
 }
 
 function appendBatch() {

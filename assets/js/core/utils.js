@@ -365,3 +365,15 @@ window.addEventListener('pageshow', (event) => {
     });
   }
 });
+
+// Intercept back links to pop the history stack like a native app
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.back-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      if (document.referrer && document.referrer.includes(location.host)) {
+        e.preventDefault();
+        window.history.back();
+      }
+    });
+  });
+});
