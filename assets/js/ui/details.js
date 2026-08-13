@@ -104,17 +104,25 @@ function render(app, initialVersion) {
   const heroTitle = $('#hero-title');
   const heroSub = $('#hero-subtitle');
   
+  const updateFavicon = (url) => {
+      document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(tag => tag.href = url);
+  };
+  
   heroIcon.src = cdnify(app.icon);
+  updateFavicon(heroIcon.src);
   heroIcon.dataset.idx = 0;
   heroIcon.onerror = () => {
       const all = app.allIcons || [];
       let idx = parseInt(heroIcon.dataset.idx || '0') + 1;
       if (idx < all.length) {
           heroIcon.dataset.idx = idx;
-          heroIcon.src = cdnify(all[idx]);
+          const nextUrl = cdnify(all[idx]);
+          heroIcon.src = nextUrl;
+          updateFavicon(nextUrl);
       } else {
           heroIcon.onerror = null;
           heroIcon.src = 'assets/img/placeholder.png';
+          updateFavicon('assets/img/placeholder.png');
       }
   };
 
