@@ -1,4 +1,4 @@
-import { $, cdnify } from '../core/utils.js';
+import { $, cdnify, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML } from '../core/utils.js';
 
 /**
  * Removes the splash screen with a fade-out effect.
@@ -23,20 +23,26 @@ export function buildAppCard(app) {
   card.href = `app?bundle=${app.bundle}&name=${encodeURIComponent(app.name)}&repo=${app.source}${verParam}`;
   
   const icon = document.createElement('img');
-  icon.src = cdnify(app.icon);
+  icon.dataset.src = cdnify(app.icon);
+  icon.src = PLACEHOLDER_SRC;
   icon.loading = 'lazy';
   icon.className = 'app-icon';
+  
+  observeSmartImage(icon);
 
   icon.dataset.idx = 0;
   icon.onerror = () => {
+    if (icon.src === PLACEHOLDER_SRC) return;
     const all = app.allIcons || [];
     let idx = parseInt(icon.dataset.idx || '0') + 1;
     if (idx < all.length) {
       icon.dataset.idx = idx;
-      icon.src = cdnify(all[idx]);
+      icon.dataset.src = cdnify(all[idx]);
+      icon.src = icon.dataset.src;
     } else {
       icon.onerror = null;
-      icon.src = 'assets/img/placeholder.png';
+      icon.dataset.src = 'assets/img/placeholder.png';
+      icon.src = icon.dataset.src;
     }
   };
 
@@ -45,7 +51,7 @@ export function buildAppCard(app) {
   
   const title = document.createElement('div');
   title.className = 'app-name';
-  title.textContent = app.name;
+  title.innerHTML = formatAppTitleHTML(app.name);
   
   const sub = document.createElement('div');
   sub.className = 'app-sub';
@@ -71,14 +77,22 @@ export function buildAppCard(app) {
 /**
  * Renders a standardized error message into a container.
  */
-export function renderError(container, title, msg) {
+export function renderError(container, title, msg, btnOptions) {
   if (!container) return;
+  
+  let btnHTML = '';
+  if (btnOptions !== null) {
+    const text = btnOptions?.text || 'Go Back Home';
+    const href = btnOptions?.href || './';
+    btnHTML = `<a href="${href}" class="btn-primary" style="display:inline-flex; text-decoration:none; margin-top: 16px;">${text}</a>`;
+  }
+
   container.innerHTML = `
     <div class="error-container">
       <div class="error-icon">⚠️</div>
       <h2 class="error-title">${title}</h2>
       <p class="error-text">${msg}</p>
-      <a href="./" class="btn-primary" style="display:inline-flex; text-decoration:none;">Go Back Home</a>
+      ${btnHTML}
     </div>
   `;
 }

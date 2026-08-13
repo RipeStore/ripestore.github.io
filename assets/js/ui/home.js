@@ -1,5 +1,6 @@
-import { $, ellipsize, parseDateString, qs, debounce, cdnify } from '../core/utils.js';
+import { $, ellipsize, parseDateString, qs, debounce, cdnify, observeSmartImage, PLACEHOLDER_SRC } from '../core/utils.js';
 import { streamRepos } from '../core/repo.js';
+import { getSources } from '../core/sources.js';
 import { initSearch, searchApps } from '../core/search.js';
 import { initCarousel } from '../core/carousel.js';
 import { removeSplash, buildAppCard, renderError } from './components.js';
@@ -44,7 +45,12 @@ async function loadAll() {
     filterAndPrepare();
 
     if (state.allMerged.length === 0) {
-      renderError($('main'), 'Failed to Load Apps', 'We couldn\'t load any apps from your sources. Please check your internet connection or manage your sources.');
+      const sources = getSources();
+      if (sources.length === 0) {
+        renderError($('main'), 'No Sources Added', 'You haven\'t added any app sources yet. Add a repository to discover apps.', { text: 'Manage Sources', href: 'sources.html' });
+      } else {
+        renderError($('main'), 'Failed to Load Apps', 'We couldn\'t load any apps from your sources. Please check your internet connection or manage your sources.', { text: 'Manage Sources', href: 'sources.html' });
+      }
     }
 
     removeSplash();
@@ -148,19 +154,25 @@ function renderFeatured() {
     // Background image if available (using icon as fallback blurred maybe? or just standard style)
     // For now standard style
     const icon = document.createElement('img');
-    icon.src = cdnify(a.icon);
+    icon.dataset.src = cdnify(a.icon);
+    icon.src = PLACEHOLDER_SRC;
     icon.className = 'featured-icon';
+    
+    observeSmartImage(icon);
 
     icon.dataset.idx = 0;
     icon.onerror = () => {
+      if (icon.src === PLACEHOLDER_SRC) return;
       const all = a.allIcons || [];
       let idx = parseInt(icon.dataset.idx || '0') + 1;
       if (idx < all.length) {
         icon.dataset.idx = idx;
-        icon.src = cdnify(all[idx]);
+        icon.dataset.src = cdnify(all[idx]);
+        icon.src = icon.dataset.src;
       } else {
         icon.onerror = null;
-        icon.src = 'assets/img/placeholder.png';
+        icon.dataset.src = 'assets/img/placeholder.png';
+        icon.src = icon.dataset.src;
       }
     };
     
@@ -245,8 +257,13 @@ function renderNews() {
     
     if (n.image) {
       const img = document.createElement('img');
-      img.src = cdnify(n.image);
+      img.dataset.src = cdnify(n.image);
+      img.src = PLACEHOLDER_SRC;
+      
+      observeSmartImage(img);
+      
       img.onerror = () => {
+        if (img.src === PLACEHOLDER_SRC) return;
         const placeholder = document.createElement('div');
         placeholder.className = 'news-placeholder';
         img.replaceWith(placeholder);

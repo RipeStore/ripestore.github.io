@@ -1,4 +1,4 @@
-import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal } from '../core/utils.js';
+import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML } from '../core/utils.js';
 import { normalizeRepo, fetchRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
@@ -108,27 +108,57 @@ function render(app, initialVersion) {
       document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(tag => tag.href = url);
   };
   
-  heroIcon.src = cdnify(app.icon);
-  updateFavicon(heroIcon.src);
+  heroIcon.dataset.src = cdnify(app.icon);
+  heroIcon.src = PLACEHOLDER_SRC;
+  observeSmartImage(heroIcon);
+  updateFavicon(heroIcon.dataset.src);
   heroIcon.dataset.idx = 0;
   heroIcon.onerror = () => {
+      if (heroIcon.src === PLACEHOLDER_SRC) return;
       const all = app.allIcons || [];
       let idx = parseInt(heroIcon.dataset.idx || '0') + 1;
       if (idx < all.length) {
           heroIcon.dataset.idx = idx;
           const nextUrl = cdnify(all[idx]);
+          heroIcon.dataset.src = nextUrl;
           heroIcon.src = nextUrl;
           updateFavicon(nextUrl);
       } else {
           heroIcon.onerror = null;
-          heroIcon.src = 'assets/img/placeholder.png';
+          heroIcon.dataset.src = 'assets/img/placeholder.png';
+          heroIcon.src = heroIcon.dataset.src;
           updateFavicon('assets/img/placeholder.png');
       }
   };
 
-  heroTitle.textContent = app.name;
-  document.title = app.name;
+  heroTitle.innerHTML = formatAppTitleHTML(app.name);
+  document.title = `${app.name} | RipeStore`;
   heroSub.textContent = app.subtitle || app.dev || 'Utility';
+  
+  // Dynamic SEO Meta Tags
+  const updateMeta = (name, content) => {
+    let el = document.querySelector(`meta[name="${name}"]`) || document.querySelector(`meta[property="${name}"]`);
+    if (!el) {
+      el = document.createElement('meta');
+      if (name.startsWith('og:') || name.startsWith('twitter:')) el.setAttribute('property', name);
+      else el.setAttribute('name', name);
+      document.head.appendChild(el);
+    }
+    el.setAttribute('content', content);
+  };
+  
+  const cleanDesc = (app.subtitle || app.desc || "Download on RipeStore.").replace(/<[^>]*>?/gm, '').replace(/\\n/g, ' ').substring(0, 160);
+  updateMeta('description', cleanDesc);
+  updateMeta('og:title', `${app.name} | RipeStore`);
+  updateMeta('og:description', cleanDesc);
+  updateMeta('twitter:title', `${app.name} | RipeStore`);
+  updateMeta('twitter:description', cleanDesc);
+  
+  if (app.icon) {
+      const fullIcon = cdnify(app.icon);
+      updateMeta('og:image', fullIcon);
+      updateMeta('twitter:image', fullIcon);
+  }
   
   // Versions Dropdown
   const verSel = $('#version-select');
@@ -239,10 +269,37 @@ function renderHeavy(app) {
         const img = document.createElement('img');
         img.loading = 'lazy'; 
         
+        img.onload = () => {
+          if (img.naturalWidth <= 1 && img.naturalHeight <= 1) {
+            img.onerror();
+            return;
+          }
+          
+          // Deep inspection for full-size transparent dummy spacers (e.g., LiveContainer)
+          const probe = new Image();
+          probe.crossOrigin = 'Anonymous';
+          probe.onload = () => {
+            try {
+              const cvs = document.createElement('canvas');
+              cvs.width = 1; cvs.height = 1;
+              const ctx = cvs.getContext('2d', { willReadFrequently: true });
+              ctx.drawImage(probe, 0, 0, 1, 1);
+              // If the center pixel's alpha channel is completely 0, it's a transparent spacer
+              if (ctx.getImageData(0, 0, 1, 1).data[3] === 0) {
+                img.onerror();
+              }
+            } catch (e) {
+              // Tainted canvas (CORS restricted repo), assume valid image to be safe
+            }
+          };
+          probe.src = img.src;
+        };
+        
         img.onerror = () => {
           img.remove();
           if (shotContainer.children.length === 0) {
             $('#screenshots-section').classList.add('hidden');
+            $('#desc-heading')?.classList.remove('hidden');
           } else {
             shotContainer.dispatchEvent(new Event('scroll'));
           }
@@ -255,6 +312,7 @@ function renderHeavy(app) {
       // Append all items in a single synchronous DOM operation
       if (fragment.children.length > 0) {
         $('#screenshots-section').classList.remove('hidden');
+        $('#desc-heading')?.classList.add('hidden');
         shotContainer.appendChild(fragment);
       }
       
@@ -281,6 +339,10 @@ function renderHeavy(app) {
     if (firstImageIdx !== -1) {
         const preImg = new Image();
         preImg.onload = () => {
+             if (preImg.naturalWidth <= 1 && preImg.naturalHeight <= 1) {
+                 preImg.onerror();
+                 return;
+             }
              const ratio = preImg.naturalWidth / preImg.naturalHeight;
              shotContainer.style.setProperty('--screenshot-ratio', ratio);
              if (ratio > 1) {
@@ -295,19 +357,41 @@ function renderHeavy(app) {
     } else {
         renderShots();
     }
+  } else if (!shots.length) {
+    $('#desc-heading')?.classList.remove('hidden');
   }
   
   // Handle "more" button for Description
   const descEl = $('#app-desc');
   const moreBtn = $('#desc-more-btn');
-  if (descEl.scrollHeight > descEl.clientHeight) {
+  
+  // Get the height while clamped
+  const clampedHeight = descEl.clientHeight;
+  
+  descEl.classList.remove('desc-clamped');
+  descEl.classList.remove('desc-expanded');
+  
+  // Force layout recalculation
+  void descEl.offsetHeight;
+  
+  // If un-clamped height is strictly larger than clamped height
+  const isDescOverflowing = descEl.scrollHeight > (clampedHeight + 2);
+  descEl.classList.add('desc-clamped');
+
+  if (isDescOverflowing) {
       moreBtn.classList.remove('hidden');
-      moreBtn.onclick = () => {
+      const toggleDesc = () => {
         const isClamped = descEl.classList.toggle('desc-clamped');
+        descEl.classList.toggle('desc-expanded', !isClamped);
         moreBtn.textContent = isClamped ? 'more' : 'less';
       };
+      moreBtn.onclick = toggleDesc;
+      descEl.onclick = toggleDesc;
+      descEl.style.cursor = 'pointer';
   } else {
       moreBtn.classList.add('hidden');
+      descEl.onclick = null;
+      descEl.style.cursor = 'default';
   }
 
   // Permissions Modal Setup
@@ -644,6 +728,7 @@ function updateVersionUI(sel, app) {
   $('#hero-get').href = url;
   
   const whatsNew = $('#whats-new');
+  const whatsNewTitle = whatsNew.querySelector('h2');
   const whatsNewText = $('#whats-new-text');
   const whatsNewMoreBtn = $('#whats-new-more-btn');
   
@@ -651,26 +736,43 @@ function updateVersionUI(sel, app) {
   whatsNew.classList.remove('hidden');
 
   if (notes && notes.length > 5) {
+    if (whatsNewTitle) whatsNewTitle.style.display = 'block';
     whatsNewText.style.display = 'block';
     whatsNewText.innerHTML = linkify(notes);
     
     // Reset state
+    whatsNewText.classList.remove('desc-expanded');
     whatsNewText.classList.add('desc-clamped');
     whatsNewMoreBtn.textContent = 'more';
     
     // Check if expansion is needed
     requestAnimationFrame(() => {
-      if (whatsNewText.scrollHeight > whatsNewText.clientHeight) {
-        whatsNewMoreBtn.style.display = 'inline-block';
-        whatsNewMoreBtn.onclick = () => {
+      const whatsNewClampedHeight = whatsNewText.clientHeight;
+      
+      whatsNewText.classList.remove('desc-clamped');
+      void whatsNewText.offsetHeight;
+      
+      const isOverflowing = whatsNewText.scrollHeight > (whatsNewClampedHeight + 2);
+      whatsNewText.classList.add('desc-clamped');
+
+      if (isOverflowing) {
+        whatsNewMoreBtn.classList.remove('hidden');
+        const toggleWhatsNew = () => {
           const isClamped = whatsNewText.classList.toggle('desc-clamped');
+          whatsNewText.classList.toggle('desc-expanded', !isClamped);
           whatsNewMoreBtn.textContent = isClamped ? 'more' : 'less';
         };
+        whatsNewMoreBtn.onclick = toggleWhatsNew;
+        whatsNewText.onclick = toggleWhatsNew;
+        whatsNewText.style.cursor = 'pointer';
       } else {
-        whatsNewMoreBtn.style.display = 'none';
+        whatsNewMoreBtn.classList.add('hidden');
+        whatsNewText.onclick = null;
+        whatsNewText.style.cursor = 'default';
       }
     });
   } else {
+    if (whatsNewTitle) whatsNewTitle.style.display = 'none';
     whatsNewText.style.display = 'none';
     whatsNewMoreBtn.style.display = 'none';
   }

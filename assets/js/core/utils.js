@@ -1,3 +1,7 @@
+import { marked } from 'https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js';
+
+marked.use({ gfm: true, breaks: true });
+
 /**
  * Simple fast string hash.
  */
@@ -119,12 +123,78 @@ export async function fetchJSON(url) {
  */
 export function linkify(text) {
   if (!text) return "";
-  // Escape HTML first
+  
+  let processed = text.replace(/(^|[\s(\[{])@([a-zA-Z0-9_-]+)/g, '$1[@$2](https://github.com/$2)');
+  
+  const seenEmojis = new Set();
+  const emojiRegex = /((?:[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF])(?:[\uFE0E\uFE0F]|[\uD83C][\uDFFB-\uDFFF])?(?:\u200D(?:[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF])(?:[\uFE0E\uFE0F]|[\uD83C][\uDFFB-\uDFFF])?)*)\s*/g;
+  processed = processed.replace(emojiRegex, (match, emojiCode, offset, fullStr) => {
+    const normalized = emojiCode.replace(/\uFE0F/g, '');
+    if (seenEmojis.has(normalized)) {
+      const prev = fullStr[offset - 1];
+      const next = fullStr[offset + match.length];
+      if (prev && next && /\S/.test(prev) && /\S/.test(next) && !/^[.,!?;:]/.test(next)) {
+        return ' ';
+      }
+      return '';
+    }
+    seenEmojis.add(normalized);
+    return match;
+  });
+  
+  processed = processed.replace(/^[\s]*[•◦▪⁃] /gm, '- ');
+
+  processed = processed.replace(/^(\s*(?:-\s*)?)\[([^\]]{2,})\](?!\s*[(:])/gm, '$1<span class="changelog-tag">$2</span>');
+
+  let html = marked.parse(processed);
+  
+  const alertRegex = /(?:<blockquote>\s*)?<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:<\/p>\s*<p>|<br>\s*|\s*)([\s\S]*?)<\/p>(?:\s*<\/blockquote>)?/gi;
+  html = html.replace(alertRegex, (match, type, content) => {
+    const t = type.toLowerCase();
+    const title = t.charAt(0).toUpperCase() + t.slice(1);
+    const icons = {
+      note: '🔵', tip: '🟢', important: '🟣', warning: '🟡', caution: '🔴'
+    };
+    return `<div class="gh-alert gh-alert-${t}"><div class="gh-alert-title">${icons[t]} ${title}</div><div class="gh-alert-content"><p>${content}</p></div></div>`;
+  });
+  
+  html = html.replace(/<a /g, '<a class="accent" target="_blank" rel="noopener noreferrer" ');
+  
+  return html;
+}
+
+
+export function formatAppTitleHTML(rawName) {
+  if (!rawName) return "";
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = rawName;
   const escaped = div.innerHTML;
-  // Replace URLs
-  return escaped.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" class="accent" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  // Only extract if explicitly delineated by brackets/parentheses or hyphens/colons
+  const endRegex = /(?:\s+[-–—:]\s+|\s*[\[\(])(beta|alpha|rc|preview|nightly)[\]\)]*\s*$/i;
+  const startRegex = /^\s*(?:[\[\(](beta|alpha|rc|preview|nightly)[\]\)]*\s+|(beta|alpha|rc|preview|nightly)\s+[-–—:]\s+)/i;
+
+  let tag = null;
+  let clean = escaped;
+
+  const endMatch = escaped.match(endRegex);
+  if (endMatch) {
+    tag = endMatch[1];
+    clean = escaped.replace(endRegex, '');
+  } else {
+    const startMatch = escaped.match(startRegex);
+    if (startMatch) {
+      tag = startMatch[1] || startMatch[2];
+      clean = escaped.replace(startRegex, '');
+    }
+  }
+
+  if (tag && clean.trim().length > 0) {
+    tag = tag.toUpperCase();
+    return `${clean.trim()} <span class="app-tag tag-${tag.toLowerCase()}">${tag}</span>`;
+  }
+  
+  return escaped;
 }
 
 /**
@@ -348,6 +418,37 @@ if ('serviceWorker' in navigator) {
 }
 
 /**
+ * A smart image observer for iOS memory cache busting issues.
+ * Manually unloads images far out of viewport and reloads them when near.
+ */
+let smartImgObserver = null;
+export const PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+export function observeSmartImage(img) {
+  if (!smartImgObserver) {
+    smartImgObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const target = entry.target;
+        if (entry.isIntersecting) {
+          if (target.src === PLACEHOLDER_SRC || !target.src || target.src === window.location.href) {
+            target.src = target.dataset.src;
+          }
+        } else {
+          // Unload when far out of view to save iOS memory limits
+          if (target.src !== PLACEHOLDER_SRC) {
+            target.src = PLACEHOLDER_SRC;
+          }
+        }
+      });
+    }, {
+      rootMargin: '1000px' // Load when within 1000px of scrolling into view
+    });
+  }
+  
+  smartImgObserver.observe(img);
+}
+
+/**
  * Handle graceful restoration from bfcache (Back-Forward Cache).
  * Mobile browsers (especially iOS Safari) aggressively unload images from memory 
  * to save resources when navigating away. When returning via the back button, 
@@ -364,13 +465,17 @@ window.addEventListener('pageshow', (event) => {
       return;
     }
 
-    document.querySelectorAll('img').forEach(img => {
-      // If the image has a src but its decoded bitmap was evicted (naturalWidth is 0)
-      if (img.src && img.naturalWidth === 0) {
-        // Re-assigning the src forcefully wakes up the browser's image decoder
-        img.src = img.src;
-      }
-    });
+    // Delay the image restoration check slightly.
+    // iOS Safari uses a cached snapshot for the swipe-back gesture. 
+    // Checking naturalWidth synchronously during the transition can cause it to return 0 erroneously, 
+    // and re-assigning img.src causes a visible flicker by interrupting the snapshot.
+    setTimeout(() => {
+      document.querySelectorAll('img').forEach(img => {
+        if (img.src && img.naturalWidth === 0) {
+          img.src = img.src;
+        }
+      });
+    }, 500);
   }
 });
 

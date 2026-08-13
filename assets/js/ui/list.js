@@ -1,5 +1,6 @@
-import { $, qs, parseDateString, cdnify } from '../core/utils.js';
+import { $, qs, parseDateString, cdnify, observeSmartImage, PLACEHOLDER_SRC } from '../core/utils.js';
 import { streamRepos } from '../core/repo.js';
+import { getSources } from '../core/sources.js';
 import { removeSplash, buildAppCard, renderError } from './components.js';
 
 async function loadList() {
@@ -41,7 +42,12 @@ async function loadList() {
       if (data.progress === 1) {
           if ((type === 'featured' && (!data.featured || data.featured.length === 0)) ||
               (type === 'news' && (!data.news || data.news.length === 0))) {
-            renderError($('main'), 'List Empty', `No ${type} items were found in your sources.`);
+            const sources = getSources();
+            if (sources.length === 0) {
+              renderError($('main'), 'No Sources Added', 'You haven\'t added any app sources yet. Add a repository to discover apps.', { text: 'Manage Sources', href: 'sources.html' });
+            } else {
+              renderError($('main'), 'List Empty', `No ${type} items were found in your sources.`, { text: 'Go Back Home', href: './' });
+            }
           }
           finishLoading();
       }
@@ -129,8 +135,11 @@ function renderNews(news, allApps = []) {
     
     if (n.image) {
       const img = document.createElement('img');
-      img.src = n.image;
+      img.dataset.src = cdnify(n.image);
+      img.src = PLACEHOLDER_SRC;
+      observeSmartImage(img);
       img.onerror = () => {
+        if (img.src === PLACEHOLDER_SRC) return;
         const placeholder = document.createElement('div');
         placeholder.className = 'news-placeholder';
         img.replaceWith(placeholder);
