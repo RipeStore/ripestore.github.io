@@ -354,8 +354,16 @@ if ('serviceWorker' in navigator) {
  * the DOM is restored but images may remain invisible. 
  * This forces unloaded images to safely re-render.
  */
+const pageLoadTime = Date.now();
+
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) {
+    const sourcesChanged = parseInt(localStorage.getItem('ripe_sources_changed') || '0');
+    if (sourcesChanged > pageLoadTime) {
+      location.reload();
+      return;
+    }
+
     document.querySelectorAll('img').forEach(img => {
       // If the image has a src but its decoded bitmap was evicted (naturalWidth is 0)
       if (img.src && img.naturalWidth === 0) {

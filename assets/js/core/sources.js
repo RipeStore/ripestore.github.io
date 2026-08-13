@@ -19,6 +19,7 @@ export function getSources() {
  */
 export async function setSources(arr) {
   localStorage.setItem(KEY, JSON.stringify(arr));
+  localStorage.setItem('ripe_sources_changed', Date.now().toString());
   try {
     await db.remove('ripe_master_cache');
     await db.remove('ripe_master_cache_v2');
