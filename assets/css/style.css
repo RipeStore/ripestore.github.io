@@ -322,21 +322,7 @@ main {
   transition: mask-image 0.3s, -webkit-mask-image 0.3s;
 }
 
-/* Dynamic Fading Edges */
-.carousel-container.mask-left.mask-right .scroll-row:not(.screenshots-row) {
-  mask-image: linear-gradient(to right, transparent, black 100px, black calc(100% - 100px), transparent);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 100px, black calc(100% - 100px), transparent);
-}
-
-.carousel-container.mask-left:not(.mask-right) .scroll-row:not(.screenshots-row) {
-  mask-image: linear-gradient(to right, transparent, black 100px);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 100px);
-}
-
-.carousel-container.mask-right:not(.mask-left) .scroll-row:not(.screenshots-row) {
-  mask-image: linear-gradient(to left, transparent, black 100px);
-  -webkit-mask-image: linear-gradient(to left, transparent, black 100px);
-}
+/* Dynamic Fading Edges Removed */
 
 .scroll-row::-webkit-scrollbar {
   display: none;
