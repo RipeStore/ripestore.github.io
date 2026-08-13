@@ -209,8 +209,13 @@ function render(app, initialVersion) {
     devEl.textContent = devName;
   }
 
-  $('#meta-cat').textContent = app.category || 'Utility';
-  $('#meta-source-name').textContent = app.repoName || getSourceLabel(app.versions[0] || { source: app.source });
+  let cat = app.category || 'Utility';
+  cat = cat.charAt(0).toUpperCase() + cat.slice(1);
+  $('#meta-cat').innerHTML = `<a href="./?q=${encodeURIComponent('category:' + cat)}" class="accent" style="text-decoration:none">${cat}</a>`;
+  
+  const sourceName = app.repoName || getSourceLabel(app.versions[0] || { source: app.source });
+  const sourceUrl = (app.versions[0] && app.versions[0].source) ? app.versions[0].source : app.source;
+  $('#meta-source-name').innerHTML = `<a href="./?q=${encodeURIComponent('source:' + sourceUrl)}" class="accent" style="text-decoration:none">${sourceName}</a>`;
 
   // HEAVY items: Screenshots, "More" buttons calculations, Modals -> Defer
   requestAnimationFrame(() => {

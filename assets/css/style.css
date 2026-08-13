@@ -913,14 +913,14 @@ main {
   margin-bottom: 2px;
 }
 
-.tag-beta { background: rgba(0, 122, 255, 0.15); color: #007aff; }
-.tag-alpha { background: rgba(255, 59, 48, 0.15); color: #ff3b30; }
+.tag-beta, .tag-public-beta, .tag-closed-beta { background: rgba(0, 122, 255, 0.15); color: #007aff; }
+.tag-alpha, .tag-public-alpha { background: rgba(255, 59, 48, 0.15); color: #ff3b30; }
 .tag-rc { background: rgba(255, 149, 0, 0.15); color: #ff9500; }
 .tag-preview, .tag-nightly { background: rgba(175, 82, 222, 0.15); color: #af52de; }
 
 @media (prefers-color-scheme: dark) {
-  .tag-beta { background: rgba(10, 132, 255, 0.2); color: #0a84ff; }
-  .tag-alpha { background: rgba(255, 69, 58, 0.2); color: #ff453a; }
+  .tag-beta, .tag-public-beta, .tag-closed-beta { background: rgba(10, 132, 255, 0.2); color: #0a84ff; }
+  .tag-alpha, .tag-public-alpha { background: rgba(255, 69, 58, 0.2); color: #ff453a; }
   .tag-rc { background: rgba(255, 159, 10, 0.2); color: #ff9f0a; }
   .tag-preview, .tag-nightly { background: rgba(191, 90, 242, 0.2); color: #bf5af2; }
 }

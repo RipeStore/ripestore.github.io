@@ -310,6 +310,20 @@ function filterAndPrepare() {
       if (provider) {
         result = state.allMerged.filter(app => (app.dev || '').toLowerCase().includes(provider));
       }
+    } else if (q.toLowerCase().startsWith('category:')) {
+      const cat = q.substring(9).trim().toLowerCase();
+      if (cat) {
+        result = state.allMerged.filter(app => (app.category || 'Utility').toLowerCase().includes(cat));
+      }
+    } else if (q.toLowerCase().startsWith('source:')) {
+      const src = q.substring(7).trim().toLowerCase();
+      if (src) {
+        result = state.allMerged.filter(app => {
+          const s1 = ((app.versions && app.versions[0] && app.versions[0].source) || app.source || '').toLowerCase();
+          const s2 = (app.repoName || '').toLowerCase();
+          return s1.includes(src) || s2.includes(src);
+        });
+      }
     } else {
       result = searchApps(q, state.allMerged);
     }

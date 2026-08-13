@@ -170,28 +170,28 @@ export function formatAppTitleHTML(rawName) {
   div.textContent = rawName;
   const escaped = div.innerHTML;
 
-  // Only extract if explicitly delineated by brackets/parentheses or hyphens/colons
-  const endRegex = /(?:\s+[-–—:]\s+|\s*[\[\(])(beta|alpha|rc|preview|nightly)[\]\)]*\s*$/i;
-  const startRegex = /^\s*(?:[\[\(](beta|alpha|rc|preview|nightly)[\]\)]*\s+|(beta|alpha|rc|preview|nightly)\s+[-–—:]\s+)/i;
+  const endRegex = /(\s+[-–—:]\s+|\s*[\[\(])(public beta|public alpha|closed beta|beta|alpha|rc|preview|nightly)[\]\)]*\s*$/i;
+  const startRegex = /^\s*([\[\(])(public beta|public alpha|closed beta|beta|alpha|rc|preview|nightly)([\]\)]*\s+)|(public beta|public alpha|closed beta|beta|alpha|rc|preview|nightly)(\s+[-–—:]\s+)/i;
 
   let tag = null;
   let clean = escaped;
 
   const endMatch = escaped.match(endRegex);
   if (endMatch) {
-    tag = endMatch[1];
+    tag = endMatch[2];
     clean = escaped.replace(endRegex, '');
   } else {
     const startMatch = escaped.match(startRegex);
     if (startMatch) {
-      tag = startMatch[1] || startMatch[2];
+      tag = startMatch[2] || startMatch[4];
       clean = escaped.replace(startRegex, '');
     }
   }
 
   if (tag && clean.trim().length > 0) {
     tag = tag.toUpperCase();
-    return `${clean.trim()} <span class="app-tag tag-${tag.toLowerCase()}">${tag}</span>`;
+    const tagClass = tag.toLowerCase().replace(/\s+/g, '-');
+    return `${clean.trim()} <span class="app-tag tag-${tagClass}">${tag}</span>`;
   }
   
   return escaped;
