@@ -1,4 +1,4 @@
-import { $, qs, parseDateString, cdnify, observeSmartImage, PLACEHOLDER_SRC } from '../core/utils.js';
+import { $, qs, parseDateString, cdnify, observeSmartImage, PLACEHOLDER_SRC, updateSEO, updateMeta } from '../core/utils.js';
 import { streamRepos } from '../core/repo.js';
 import { getSources } from '../core/sources.js';
 import { removeSplash, buildAppCard, renderError } from './components.js';
@@ -6,11 +6,42 @@ import { removeSplash, buildAppCard, renderError } from './components.js';
 async function loadList() {
   const type = qs('type'); // 'featured' or 'news'
   if (!type) {
-    $('#list-title').textContent = 'Unknown List';
+    $('#list-title').textContent = 'App List';
+    updateSEO({
+      title: 'App List | RipeStore',
+      description: 'Discover and sideload alternative iOS apps from community repositories on RipeStore.',
+      keywords: 'iOS, App Store, RipeStore, alternative apps, sideloading',
+      url: window.location.href
+    });
     return;
   }
   
-  $('#list-title').textContent = type === 'featured' ? 'Featured' : 'Latest News';
+  if (type === 'news') {
+    $('#list-title').textContent = 'Latest News';
+    updateSEO({
+      title: 'Latest News | RipeStore',
+      description: 'Stay updated with the latest iOS app releases, announcements, sideloading updates, and news on RipeStore.',
+      keywords: 'iOS news, app updates, sideloading news, RipeStore news, iOS releases, AltStore news, Scarlet news',
+      url: window.location.href
+    });
+  } else if (type === 'featured') {
+    $('#list-title').textContent = 'Featured Apps';
+    updateSEO({
+      title: 'Featured Apps | RipeStore',
+      description: 'Discover top recommended and featured sideloadable iOS apps curated from your repositories on RipeStore.',
+      keywords: 'featured iOS apps, recommended apps, iOS sideloading, IPA download, RipeStore',
+      url: window.location.href
+    });
+  } else {
+    const formatted = type.charAt(0).toUpperCase() + type.slice(1);
+    $('#list-title').textContent = formatted;
+    updateSEO({
+      title: `${formatted} | RipeStore`,
+      description: `Browse ${formatted.toLowerCase()} apps and updates on RipeStore.`,
+      keywords: `${formatted.toLowerCase()}, iOS apps, sideloading, RipeStore`,
+      url: window.location.href
+    });
+  }
   
   const splashStatus = $('#splash-status');
   const splash = $('#splash');
@@ -87,6 +118,14 @@ function renderFeatured(apps, ids) {
     return;
   }
 
+  // Update social sharing image with first featured app icon if present
+  const firstApp = featuredApps.find(a => a.icon);
+  if (firstApp) {
+    const fullIcon = cdnify(firstApp.icon);
+    updateMeta('og:image', fullIcon);
+    updateMeta('twitter:image', fullIcon);
+  }
+
   featuredApps.forEach(a => {
     grid.appendChild(buildAppCard(a));
   });
@@ -115,6 +154,14 @@ function renderNews(news, allApps = []) {
     }
     return true;
   });
+
+  // Update social preview image with first available news image
+  const firstNewsWithImage = filteredNews.find(n => n.image);
+  if (firstNewsWithImage) {
+    const fullImg = cdnify(firstNewsWithImage.image);
+    updateMeta('og:image', fullImg);
+    updateMeta('twitter:image', fullImg);
+  }
 
   // Use a different grid layout for news? Or just stack them.
   // We can reuse .news-card but remove the fixed width/flex
@@ -172,3 +219,4 @@ function renderNews(news, allApps = []) {
 }
 
 loadList();
+

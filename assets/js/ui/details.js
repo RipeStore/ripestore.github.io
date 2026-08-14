@@ -1,4 +1,4 @@
-import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML } from '../core/utils.js';
+import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta } from '../core/utils.js';
 import { normalizeRepo, fetchRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
@@ -10,6 +10,14 @@ async function init() {
   const repo = qs('repo');
   const nameParam = qs('name');
   const versionParam = qs('version');
+  
+  if (nameParam) {
+    updateSEO({
+      title: `${nameParam} | RipeStore`,
+      description: `Download ${nameParam} on RipeStore. Alternative iOS app store.`,
+      url: window.location.href
+    });
+  }
   
   if (!bundle || !repo) {
     renderError($('main'), 'Missing Information', 'The link you followed is incomplete. Please try searching for the app instead.');
@@ -132,33 +140,17 @@ function render(app, initialVersion) {
   };
 
   heroTitle.innerHTML = formatAppTitleHTML(app.name);
-  document.title = `${app.name} | RipeStore`;
   heroSub.textContent = app.subtitle || app.dev || 'Utility';
   
   // Dynamic SEO Meta Tags
-  const updateMeta = (name, content) => {
-    let el = document.querySelector(`meta[name="${name}"]`) || document.querySelector(`meta[property="${name}"]`);
-    if (!el) {
-      el = document.createElement('meta');
-      if (name.startsWith('og:') || name.startsWith('twitter:')) el.setAttribute('property', name);
-      else el.setAttribute('name', name);
-      document.head.appendChild(el);
-    }
-    el.setAttribute('content', content);
-  };
-  
   const cleanDesc = (app.subtitle || app.desc || "Download on RipeStore.").replace(/<[^>]*>?/gm, '').replace(/\\n/g, ' ').substring(0, 160);
-  updateMeta('description', cleanDesc);
-  updateMeta('og:title', `${app.name} | RipeStore`);
-  updateMeta('og:description', cleanDesc);
-  updateMeta('twitter:title', `${app.name} | RipeStore`);
-  updateMeta('twitter:description', cleanDesc);
-  
-  if (app.icon) {
-      const fullIcon = cdnify(app.icon);
-      updateMeta('og:image', fullIcon);
-      updateMeta('twitter:image', fullIcon);
-  }
+  updateSEO({
+    title: `${app.name} | RipeStore`,
+    description: cleanDesc,
+    url: window.location.href,
+    image: app.icon ? cdnify(app.icon) : undefined,
+    keywords: `${app.name}, ${app.category || 'iOS app'}, sideload, IPA download, RipeStore`
+  });
   
   // Versions Dropdown
   const verSel = $('#version-select');

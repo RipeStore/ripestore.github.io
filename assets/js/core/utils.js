@@ -490,3 +490,52 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
+
+/**
+ * Updates or creates a meta tag in document.head.
+ */
+export function updateMeta(name, content) {
+  if (content === undefined || content === null) return;
+  let el = document.querySelector(`meta[name="${name}"]`) || document.querySelector(`meta[property="${name}"]`);
+  if (!el) {
+    el = document.createElement('meta');
+    if (name.startsWith('og:') || name.startsWith('twitter:')) {
+      el.setAttribute('property', name);
+    } else {
+      el.setAttribute('name', name);
+    }
+    document.head.appendChild(el);
+  }
+  el.setAttribute('content', content);
+}
+
+/**
+ * Updates full page SEO meta tags and document.title.
+ */
+export function updateSEO({ title, description, url, image, keywords, type = 'website' } = {}) {
+  if (title) {
+    document.title = title;
+    updateMeta('og:title', title);
+    updateMeta('twitter:title', title);
+  }
+  if (description) {
+    const cleanDesc = description.replace(/<[^>]*>?/gm, '').replace(/\\n/g, ' ').substring(0, 160).trim();
+    updateMeta('description', cleanDesc);
+    updateMeta('og:description', cleanDesc);
+    updateMeta('twitter:description', cleanDesc);
+  }
+  if (url) {
+    updateMeta('og:url', url);
+  }
+  if (image) {
+    updateMeta('og:image', image);
+    updateMeta('twitter:image', image);
+  }
+  if (keywords) {
+    updateMeta('keywords', keywords);
+  }
+  if (type) {
+    updateMeta('og:type', type);
+  }
+}
+
