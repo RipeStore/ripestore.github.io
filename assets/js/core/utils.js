@@ -16,68 +16,138 @@ export function hashString(s) {
  */
 export const db = {
   _db: null,
+  _dbPromise: null,
+  _mem: new Map(),
+
   async _getDB() {
     if (this._db) return this._db;
-    return new Promise((resolve) => {
+    if (this._dbPromise) return this._dbPromise;
+
+    this._dbPromise = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this._dbPromise = null;
+        resolve(null);
+      }, 1500);
+
       try {
+        if (typeof indexedDB === 'undefined') {
+          clearTimeout(timer);
+          this._dbPromise = null;
+          return resolve(null);
+        }
+
         const req = indexedDB.open('RipeStoreDB', 1);
+
         req.onupgradeneeded = () => {
-          try { req.result.createObjectStore('kv'); } catch(e) {}
+          try {
+            if (!req.result.objectStoreNames.contains('kv')) {
+              req.result.createObjectStore('kv');
+            }
+          } catch (e) {}
         };
-        req.onsuccess = () => { this._db = req.result; resolve(req.result); };
-        req.onerror = () => { console.error("IDB Error", req.error); resolve(null); };
+
+        req.onsuccess = () => {
+          clearTimeout(timer);
+          this._db = req.result;
+          this._db.onversionchange = () => {
+            try { this._db.close(); } catch (_) {}
+            this._db = null;
+            this._dbPromise = null;
+          };
+          this._db.onclose = () => {
+            this._db = null;
+            this._dbPromise = null;
+          };
+          resolve(this._db);
+        };
+
+        req.onerror = () => {
+          clearTimeout(timer);
+          console.error("IDB Error", req.error);
+          this._dbPromise = null;
+          resolve(null);
+        };
+
+        req.onblocked = () => {
+          clearTimeout(timer);
+          this._dbPromise = null;
+          resolve(null);
+        };
       } catch (e) {
+        clearTimeout(timer);
         console.error("IDB Open Failed", e);
+        this._dbPromise = null;
         resolve(null);
       }
     });
+
+    return this._dbPromise;
   },
+
   async get(k) {
-    const db = await this._getDB();
-    if (!db) return null;
+    const idb = await this._getDB();
+    if (!idb) return this._mem.has(k) ? this._mem.get(k) : null;
     return new Promise((resolve) => {
       try {
-        const trans = db.transaction('kv', 'readonly');
+        const trans = idb.transaction('kv', 'readonly');
         const req = trans.objectStore('kv').get(k);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(null);
-      } catch(e) { resolve(null); }
+        req.onsuccess = () => resolve(req.result !== undefined ? req.result : (this._mem.has(k) ? this._mem.get(k) : null));
+        req.onerror = () => resolve(this._mem.has(k) ? this._mem.get(k) : null);
+        trans.onabort = () => resolve(this._mem.has(k) ? this._mem.get(k) : null);
+      } catch (e) {
+        resolve(this._mem.has(k) ? this._mem.get(k) : null);
+      }
     });
   },
+
   async set(k, v) {
-    const db = await this._getDB();
-    if (!db) return false;
+    this._mem.set(k, v);
+    const idb = await this._getDB();
+    if (!idb) return true;
     return new Promise((resolve) => {
       try {
-        const trans = db.transaction('kv', 'readwrite');
+        const trans = idb.transaction('kv', 'readwrite');
         const req = trans.objectStore('kv').put(v, k);
         req.onsuccess = () => resolve(true);
         req.onerror = () => resolve(false);
-      } catch(e) { resolve(false); }
+        trans.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
     });
   },
+
   async remove(k) {
-    const db = await this._getDB();
-    if (!db) return false;
+    this._mem.delete(k);
+    const idb = await this._getDB();
+    if (!idb) return true;
     return new Promise((resolve) => {
       try {
-        const trans = db.transaction('kv', 'readwrite');
+        const trans = idb.transaction('kv', 'readwrite');
         const req = trans.objectStore('kv').delete(k);
         req.onsuccess = () => resolve(true);
         req.onerror = () => resolve(false);
-      } catch(e) { resolve(false); }
+        trans.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
     });
   },
+
   async clear() {
-    const db = await this._getDB();
-    if (!db) return false;
+    this._mem.clear();
+    const idb = await this._getDB();
+    if (!idb) return true;
     return new Promise((resolve) => {
       try {
-        const trans = db.transaction('kv', 'readwrite');
+        const trans = idb.transaction('kv', 'readwrite');
         const req = trans.objectStore('kv').clear();
         req.onsuccess = () => resolve(true);
         req.onerror = () => resolve(false);
-      } catch(e) { resolve(false); }
+        trans.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
     });
   }
 };
@@ -406,6 +476,34 @@ export function cdnify(url) {
   } catch (e) {
     return url;
   }
+}
+
+/**
+ * Wraps an image URL with DuckDuckGo's external content proxy.
+ * Used as a fallback when direct image loading fails (e.g. due to CORS or hotlinking).
+ */
+export function getProxiedImageUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('assets/') || trimmed.startsWith('/assets/') || trimmed.startsWith('./assets/')) {
+    return null;
+  }
+  if (trimmed.includes('external-content.duckduckgo.com/iu/?u=')) {
+    return null;
+  }
+  return `https://external-content.duckduckgo.com/iu/?u=${encodeURIComponent(trimmed)}`;
+}
+
+/**
+ * Checks if an image element loaded DuckDuckGo's error placeholder SVG.
+ * DuckDuckGo returns an HTTP 400 SVG with dimensions 260x180 on remote fetch failure.
+ */
+export function isDdgErrorImage(img) {
+  if (!img) return false;
+  const src = img.currentSrc || img.src || (img.dataset && img.dataset.src) || '';
+  if (!src.includes('external-content.duckduckgo.com/iu/')) return false;
+  return (img.naturalWidth === 260 && img.naturalHeight === 180) || (img.naturalWidth === 0 && img.naturalHeight === 0);
 }
 
 // Unregister legacy Service Workers to prevent caching issues

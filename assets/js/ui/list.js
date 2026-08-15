@@ -1,4 +1,4 @@
-import { $, qs, parseDateString, cdnify, observeSmartImage, PLACEHOLDER_SRC, updateSEO, updateMeta } from '../core/utils.js';
+import { $, qs, parseDateString, cdnify, getProxiedImageUrl, isDdgErrorImage, observeSmartImage, PLACEHOLDER_SRC, updateSEO, updateMeta } from '../core/utils.js';
 import { streamRepos } from '../core/repo.js';
 import { getSources } from '../core/sources.js';
 import { removeSplash, buildAppCard, renderError } from './components.js';
@@ -185,8 +185,23 @@ function renderNews(news, allApps = []) {
       img.dataset.src = cdnify(n.image);
       img.src = PLACEHOLDER_SRC;
       observeSmartImage(img);
+      img.onload = () => {
+        if (img.src === PLACEHOLDER_SRC) return;
+        if (isDdgErrorImage(img)) {
+          img.onerror();
+        }
+      };
       img.onerror = () => {
         if (img.src === PLACEHOLDER_SRC) return;
+        if (!img.dataset.ddgTried) {
+          img.dataset.ddgTried = 'true';
+          const proxied = getProxiedImageUrl(cdnify(n.image));
+          if (proxied) {
+            img.dataset.src = proxied;
+            img.src = proxied;
+            return;
+          }
+        }
         const placeholder = document.createElement('div');
         placeholder.className = 'news-placeholder';
         img.replaceWith(placeholder);

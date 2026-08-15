@@ -1,4 +1,4 @@
-import { $, cdnify, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML } from '../core/utils.js';
+import { $, cdnify, getProxiedImageUrl, isDdgErrorImage, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML } from '../core/utils.js';
 
 /**
  * Removes the splash screen with a fade-out effect.
@@ -30,17 +30,39 @@ export function buildAppCard(app) {
   
   observeSmartImage(icon);
 
+  const all = app.allIcons || (app.icon ? [app.icon] : []);
   icon.dataset.idx = 0;
+  icon.dataset.ddgTried = '0';
+  icon.onload = () => {
+    if (icon.src === PLACEHOLDER_SRC) return;
+    if (isDdgErrorImage(icon)) {
+      icon.onerror();
+    }
+  };
   icon.onerror = () => {
     if (icon.src === PLACEHOLDER_SRC) return;
-    const all = app.allIcons || [];
-    let idx = parseInt(icon.dataset.idx || '0') + 1;
+    const curIdx = parseInt(icon.dataset.idx || '0');
+    const curUrl = all[curIdx] || app.icon;
+
+    if (icon.dataset.ddgTried !== '1') {
+      icon.dataset.ddgTried = '1';
+      const proxied = getProxiedImageUrl(curUrl ? cdnify(curUrl) : icon.dataset.src);
+      if (proxied) {
+        icon.dataset.src = proxied;
+        icon.src = proxied;
+        return;
+      }
+    }
+
+    icon.dataset.ddgTried = '0';
+    let idx = curIdx + 1;
     if (idx < all.length) {
       icon.dataset.idx = idx;
       icon.dataset.src = cdnify(all[idx]);
       icon.src = icon.dataset.src;
     } else {
       icon.onerror = null;
+      icon.onload = null;
       icon.dataset.src = 'assets/img/placeholder.png';
       icon.src = icon.dataset.src;
     }

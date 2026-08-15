@@ -78,91 +78,102 @@ export async function fetchAllRepos() {
  * Streams repository data as it loads.
  */
 export async function streamRepos(onUpdate, onComplete) {
-  const sources = getSources();
-  const now = Date.now();
-  
-  let master = await db.get(MASTER_CACHE_KEY);
-  if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
-    onUpdate({ ...master.data, progress: 1 });
-    if (onComplete) onComplete();
-    return;
-  }
+  try {
+    const sources = getSources();
+    if (!sources || sources.length === 0) {
+      onUpdate({ apps: [], news: [], featured: [], progress: 1 });
+      if (onComplete) onComplete();
+      return;
+    }
+    
+    const now = Date.now();
+    
+    let master = await db.get(MASTER_CACHE_KEY);
+    if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
+      onUpdate({ ...master.data, progress: 1 });
+      if (onComplete) onComplete();
+      return;
+    }
 
-  let allApps = [];
-  let allNews = [];
-  let featuredIds = [];
-  let loadedCount = 0;
-  let anyChanged = !master || JSON.stringify(master?.sources) !== JSON.stringify(sources);
+    let allApps = [];
+    let allNews = [];
+    let featuredIds = [];
+    let loadedCount = 0;
+    let anyChanged = !master || JSON.stringify(master?.sources) !== JSON.stringify(sources);
 
-  let lastUpdateTime = 0;
-  const UPDATE_THROTTLE = 500; 
+    let lastUpdateTime = 0;
+    const UPDATE_THROTTLE = 500; 
 
-  const handleResult = async (res, src, isFinal = false) => {
-    loadedCount++;
-    if (res.status === 'fulfilled') {
-      const { data, url, changed } = res.value;
-      
-      let normalized = await db.get(NORM_PREFIX + src);
-      if (!normalized || changed) {
-        normalized = normalizeRepo(data, url);
-        await db.set(NORM_PREFIX + src, normalized);
-        anyChanged = true;
-      }
-      
-      if (normalized.news) allNews = allNews.concat(normalized.news);
-      if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
-      allApps.push(...normalized.apps);
+    const handleResult = async (res, src, isFinal = false) => {
+      loadedCount++;
+      if (res.status === 'fulfilled') {
+        const { data, url, changed } = res.value;
+        
+        let normalized = await db.get(NORM_PREFIX + src);
+        if (!normalized || changed) {
+          normalized = normalizeRepo(data, url);
+          await db.set(NORM_PREFIX + src, normalized);
+          anyChanged = true;
+        }
+        
+        if (normalized.news) allNews = allNews.concat(normalized.news);
+        if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
+        allApps.push(...normalized.apps);
 
-      const now = Date.now();
-      if (isFinal || (now - lastUpdateTime > UPDATE_THROTTLE)) {
-          lastUpdateTime = now;
-          
-          const mergedApps = mergeByBundle(allApps);
-          const appBundles = new Set(mergedApps.map(a => a.bundle));
-          const seenNews = new Set();
-          const uniqueNews = [];
-          allNews.forEach(n => {
-            if (n.appID && !appBundles.has(n.appID)) return;
-            let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
-            if (!seenNews.has(sig)) {
-              seenNews.add(sig);
-              uniqueNews.push(n);
+        const now = Date.now();
+        if (isFinal || (now - lastUpdateTime > UPDATE_THROTTLE)) {
+            lastUpdateTime = now;
+            
+            const mergedApps = mergeByBundle(allApps);
+            const appBundles = new Set(mergedApps.map(a => a.bundle));
+            const seenNews = new Set();
+            const uniqueNews = [];
+            allNews.forEach(n => {
+              if (n.appID && !appBundles.has(n.appID)) return;
+              let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
+              if (!seenNews.has(sig)) {
+                seenNews.add(sig);
+                uniqueNews.push(n);
+              }
+            });
+
+            const updateData = {
+              apps: mergedApps,
+              news: uniqueNews,
+              featured: featuredIds,
+              progress: (loadedCount / sources.length),
+              currentRepo: normalized.repoName || src
+            };
+
+            if (isFinal) {
+                const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
+                await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: Date.now() });
             }
-          });
 
-          const updateData = {
-            apps: mergedApps,
-            news: uniqueNews,
-            featured: featuredIds,
-            progress: (loadedCount / sources.length),
-            currentRepo: normalized.repoName || src
-          };
-
-          if (isFinal) {
-              const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
-              await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: Date.now() });
-          }
-
-          onUpdate(updateData);
+            onUpdate(updateData);
+        } else {
+            onUpdate({ progress: (loadedCount / sources.length), currentRepo: normalized.repoName || src });
+        }
       } else {
-          onUpdate({ progress: (loadedCount / sources.length), currentRepo: normalized.repoName || src });
+          onUpdate({ progress: (loadedCount / sources.length) });
       }
-    } else {
-        onUpdate({ progress: (loadedCount / sources.length) });
-    }
-  };
+    };
 
-  const CHUNK_SIZE = 8;
-  for (let i = 0; i < sources.length; i += CHUNK_SIZE) {
-    const chunk = sources.slice(i, i + CHUNK_SIZE);
-    const results = await Promise.allSettled(chunk.map(src => fetchRepo(src)));
-    for (let j = 0; j < results.length; j++) {
-        const isFinal = (i + j + 1) === sources.length;
-        await handleResult(results[j], chunk[j], isFinal);
+    const CHUNK_SIZE = 8;
+    for (let i = 0; i < sources.length; i += CHUNK_SIZE) {
+      const chunk = sources.slice(i, i + CHUNK_SIZE);
+      const results = await Promise.allSettled(chunk.map(src => fetchRepo(src)));
+      for (let j = 0; j < results.length; j++) {
+          const isFinal = (i + j + 1) === sources.length;
+          await handleResult(results[j], chunk[j], isFinal);
+      }
     }
+
+    if (onComplete) onComplete();
+  } catch (err) {
+    console.error('streamRepos error', err);
+    if (onComplete) onComplete();
   }
-
-  if (onComplete) onComplete();
 }
 
 /**

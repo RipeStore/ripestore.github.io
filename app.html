@@ -23,6 +23,10 @@
   <meta name="twitter:image" content="https://ripestore.github.io/icon-192.png">
   <link rel="stylesheet" href="assets/css/style.css?v=8">
 
+  <link rel="preload" href="assets/data/actions.json" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="assets/data/entitlements.json" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="assets/data/privacy.json" as="fetch" crossorigin="anonymous">
+
   <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
   <link rel="icon" type="image/png" sizes="96x96" href="/icon-96x96.png">
   <link rel="icon" type="image/png" sizes="144x144" href="/icon-144x144.png">
@@ -146,10 +150,10 @@
   <div id="actions-modal" class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Alternatives</h3>
-        <button id="close-actions" class="close-btn">&times;</button>
+        <h3 id="actions-modal-title">Alternatives</h3>
+        <button id="close-actions" class="close-btn" aria-label="Close">&times;</button>
       </div>
-      <div id="actions-list" class="modal-body list-menu"></div>
+      <div id="actions-list" class="modal-body p-0"></div>
     </div>
   </div>
 
@@ -158,7 +162,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>App Permissions</h3>
-        <button id="close-perm" class="close-btn">&times;</button>
+        <button id="close-perm" class="close-btn" aria-label="Close">&times;</button>
       </div>
       <div id="perm-list" class="modal-body"></div>
     </div>
@@ -169,7 +173,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>App Entitlements</h3>
-        <button id="close-ent" class="close-btn">&times;</button>
+        <button id="close-ent" class="close-btn" aria-label="Close">&times;</button>
       </div>
       <div id="ent-list" class="modal-body"></div>
     </div>

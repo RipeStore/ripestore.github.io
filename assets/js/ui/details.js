@@ -1,9 +1,41 @@
-import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta } from '../core/utils.js';
+import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, getProxiedImageUrl, isDdgErrorImage, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta } from '../core/utils.js';
 import { normalizeRepo, fetchRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
 import { getDominantColor, ensureContrast } from '../core/color.js';
 import { removeSplash, getSourceLabel, renderError } from './components.js';
+
+// Preload session metadata in background for instant, zero-delay modal interactions
+const sessionData = {
+  privacy: fetchMapping('assets/data/privacy.json').then(pairs => {
+    const fullMap = {};
+    pairs.forEach(({ key, val }) => {
+      if (!fullMap[val]) fullMap[val] = [];
+      if (!fullMap[val].includes(key)) fullMap[val].push(key);
+    });
+    return fullMap;
+  }).catch(e => {
+    console.error('Failed to preload privacy mappings', e);
+    return {};
+  }),
+
+  entitlements: fetchMapping('assets/data/entitlements.json').then(pairs => {
+    const fullMap = {};
+    pairs.forEach(({ key, val }) => {
+      if (!fullMap[val]) fullMap[val] = [];
+      if (!fullMap[val].includes(key)) fullMap[val].push(key);
+    });
+    return fullMap;
+  }).catch(e => {
+    console.error('Failed to preload entitlements mappings', e);
+    return {};
+  }),
+
+  actions: fetchJSON('assets/data/actions.json').catch(e => {
+    console.error('Failed to preload actions', e);
+    return [];
+  })
+};
 
 async function init() {
   const bundle = qs('bundle');
@@ -99,11 +131,25 @@ function render(app, initialVersion) {
       img.crossOrigin = "Anonymous";
       img.src = cdnify(app.icon);
       img.onload = async () => {
+          if (isDdgErrorImage(img)) {
+              img.onerror();
+              return;
+          }
           try {
               const col = await getDominantColor(img);
               currentBaseAccent = col;
               updateAccent();
           } catch(e) {}
+      };
+      let colorDdgTried = false;
+      img.onerror = () => {
+          if (!colorDdgTried) {
+              colorDdgTried = true;
+              const proxied = getProxiedImageUrl(cdnify(app.icon));
+              if (proxied) {
+                  img.src = proxied;
+              }
+          }
       };
   }
 
@@ -116,15 +162,37 @@ function render(app, initialVersion) {
       document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(tag => tag.href = url);
   };
   
+  const all = app.allIcons || (app.icon ? [app.icon] : []);
   heroIcon.dataset.src = cdnify(app.icon);
   heroIcon.src = PLACEHOLDER_SRC;
   observeSmartImage(heroIcon);
   updateFavicon(heroIcon.dataset.src);
   heroIcon.dataset.idx = 0;
+  heroIcon.dataset.ddgTried = '0';
+  heroIcon.onload = () => {
+      if (heroIcon.src === PLACEHOLDER_SRC) return;
+      if (isDdgErrorImage(heroIcon)) {
+          heroIcon.onerror();
+      }
+  };
   heroIcon.onerror = () => {
       if (heroIcon.src === PLACEHOLDER_SRC) return;
-      const all = app.allIcons || [];
-      let idx = parseInt(heroIcon.dataset.idx || '0') + 1;
+      const curIdx = parseInt(heroIcon.dataset.idx || '0');
+      const curUrl = all[curIdx] || app.icon;
+
+      if (heroIcon.dataset.ddgTried !== '1') {
+          heroIcon.dataset.ddgTried = '1';
+          const proxied = getProxiedImageUrl(curUrl ? cdnify(curUrl) : heroIcon.dataset.src);
+          if (proxied) {
+              heroIcon.dataset.src = proxied;
+              heroIcon.src = proxied;
+              updateFavicon(proxied);
+              return;
+          }
+      }
+
+      heroIcon.dataset.ddgTried = '0';
+      let idx = curIdx + 1;
       if (idx < all.length) {
           heroIcon.dataset.idx = idx;
           const nextUrl = cdnify(all[idx]);
@@ -133,6 +201,7 @@ function render(app, initialVersion) {
           updateFavicon(nextUrl);
       } else {
           heroIcon.onerror = null;
+          heroIcon.onload = null;
           heroIcon.dataset.src = 'assets/img/placeholder.png';
           heroIcon.src = heroIcon.dataset.src;
           updateFavicon('assets/img/placeholder.png');
@@ -267,8 +336,8 @@ function renderHeavy(app) {
         img.loading = 'lazy'; 
         
         img.onload = () => {
-          if (img.naturalWidth <= 1 && img.naturalHeight <= 1) {
-            img.onerror();
+          if ((img.naturalWidth <= 1 && img.naturalHeight <= 1) || isDdgErrorImage(img)) {
+            img.onerror(true);
             return;
           }
           
@@ -283,7 +352,7 @@ function renderHeavy(app) {
               ctx.drawImage(probe, 0, 0, 1, 1);
               // If the center pixel's alpha channel is completely 0, it's a transparent spacer
               if (ctx.getImageData(0, 0, 1, 1).data[3] === 0) {
-                img.onerror();
+                img.onerror(true);
               }
             } catch (e) {
               // Tainted canvas (CORS restricted repo), assume valid image to be safe
@@ -292,7 +361,15 @@ function renderHeavy(app) {
           probe.src = img.src;
         };
         
-        img.onerror = () => {
+        img.onerror = (isSpacer = false) => {
+          if (!isSpacer && !img.dataset.ddgTried) {
+            img.dataset.ddgTried = 'true';
+            const proxied = getProxiedImageUrl(cdnify(s));
+            if (proxied) {
+              img.src = proxied;
+              return;
+            }
+          }
           img.remove();
           if (shotContainer.children.length === 0) {
             $('#screenshots-section').classList.add('hidden');
@@ -336,8 +413,8 @@ function renderHeavy(app) {
     if (firstImageIdx !== -1) {
         const preImg = new Image();
         preImg.onload = () => {
-             if (preImg.naturalWidth <= 1 && preImg.naturalHeight <= 1) {
-                 preImg.onerror();
+             if ((preImg.naturalWidth <= 1 && preImg.naturalHeight <= 1) || isDdgErrorImage(preImg)) {
+                 preImg.onerror(true);
                  return;
              }
              const ratio = preImg.naturalWidth / preImg.naturalHeight;
@@ -349,7 +426,18 @@ function renderHeavy(app) {
              }
              renderShots();
         };
-        preImg.onerror = renderShots;
+        let preDdgTried = false;
+        preImg.onerror = (isSpacer = false) => {
+             if (!isSpacer && !preDdgTried) {
+                 preDdgTried = true;
+                 const proxied = getProxiedImageUrl(cdnify(shots[firstImageIdx]));
+                 if (proxied) {
+                     preImg.src = proxied;
+                     return;
+                 }
+             }
+             renderShots();
+        };
         preImg.src = cdnify(shots[firstImageIdx]);
     } else {
         renderShots();
@@ -391,39 +479,53 @@ function renderHeavy(app) {
       descEl.style.cursor = 'default';
   }
 
+  const formatActionUrl = (urlTemplate, ipaUrl, appData) => {
+    if (!urlTemplate) return '#';
+    const sourceUrl = (appData && appData.source) ? appData.source : '';
+    const sourceName = (appData && (appData.repoName || getSourceLabel({ source: appData.source }))) || '';
+    const appName = (appData && appData.name) || '';
+    const bundleId = (appData && appData.bundle) || '';
+
+    return urlTemplate
+      .replace(/<ipaurl>|\{ipaurl\}/gi, ipaUrl || '')
+      .replace(/<sourceurl>|\{sourceurl\}|<repourl>|\{repourl\}/gi, sourceUrl)
+      .replace(/<sourcename>|\{sourcename\}|<reponame>|\{reponame\}/gi, sourceName)
+      .replace(/<appname>|\{appname\}/gi, appName)
+      .replace(/<bundle>|\{bundle\}|<bundleid>|\{bundleid\}/gi, bundleId);
+  };
+
   // Permissions Modal Setup
   if (app.permissions && Array.isArray(app.permissions) && app.permissions.length > 0) {
     $('#perm-section').classList.remove('hidden');
     $('#perm-btn').onclick = async () => {
       $('#perm-modal').classList.add('flex');
       const list = $('#perm-list');
-      list.innerHTML = '<div class="p-20 text-center">Loading...</div>';
       try {
-        const privPairs = await fetchMapping('assets/data/privacy.json');
-        const fullMap = {};
-        privPairs.forEach(({ key, val }) => {
-          if (!fullMap[val]) fullMap[val] = [];
-          if (!fullMap[val].includes(key)) fullMap[val].push(key);
-        });
-
+        const fullMap = await sessionData.privacy;
         list.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'perm-list';
         app.permissions.forEach(p => {
           const names = fullMap[p.name];
           const displayName = names ? names.join(' / ') : p.name;
           const row = document.createElement('div');
           row.className = 'perm-row';
-          row.innerHTML = `<strong>${displayName}</strong><p>${p.text || ''}</p>`;
-          list.appendChild(row);
+          row.innerHTML = `<strong>${displayName}</strong>${p.text ? `<p>${p.text}</p>` : ''}`;
+          container.appendChild(row);
         });
+        list.appendChild(container);
       } catch (e) {
         console.error('Failed to render permissions', e);
         list.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'perm-list';
         app.permissions.forEach(p => {
           const row = document.createElement('div');
           row.className = 'perm-row';
-          row.innerHTML = `<strong>${p.name}</strong><p>${p.text || ''}</p>`;
-          list.appendChild(row);
+          row.innerHTML = `<strong>${p.name}</strong>${p.text ? `<p>${p.text}</p>` : ''}`;
+          container.appendChild(row);
         });
+        list.appendChild(container);
       }
     };
     $('#close-perm').onclick = () => $('#perm-modal').classList.remove('flex');
@@ -437,33 +539,32 @@ function renderHeavy(app) {
     $('#ent-btn').onclick = async () => {
       $('#ent-modal').classList.add('flex');
       const list = $('#ent-list');
-      list.innerHTML = '<div class="p-20 text-center">Loading...</div>';
       try {
-        const entPairs = await fetchMapping('assets/data/entitlements.json');
-        const fullMap = {};
-        entPairs.forEach(({ key, val }) => {
-          if (!fullMap[val]) fullMap[val] = [];
-          if (!fullMap[val].includes(key)) fullMap[val].push(key);
-        });
-
+        const fullMap = await sessionData.entitlements;
         list.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'perm-list';
         app.entitlements.forEach(e => {
           const names = fullMap[e.name];
           const displayName = names ? names.join(' / ') : e.name;
           const row = document.createElement('div');
           row.className = 'perm-row';
-          row.innerHTML = `<strong>${displayName}</strong><p>${e.text || ''}</p>`;
-          list.appendChild(row);
+          row.innerHTML = `<strong>${displayName}</strong>${e.text ? `<p>${e.text}</p>` : ''}`;
+          container.appendChild(row);
         });
+        list.appendChild(container);
       } catch (e) {
         console.error('Failed to render entitlements', e);
         list.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'perm-list';
         app.entitlements.forEach(e => {
           const row = document.createElement('div');
           row.className = 'perm-row';
-          row.innerHTML = `<strong>${e.name}</strong><p>${e.text || ''}</p>`;
-          list.appendChild(row);
+          row.innerHTML = `<strong>${e.name}</strong>${e.text ? `<p>${e.text}</p>` : ''}`;
+          container.appendChild(row);
         });
+        list.appendChild(container);
       }
     };
     $('#close-ent').onclick = () => $('#ent-modal').classList.remove('flex');
@@ -494,45 +595,60 @@ function renderHeavy(app) {
 
   const renderActionsList = async () => {
       const ipaUrl = $('#hero-get').href;
+      const titleEl = $('#actions-modal-title');
+      if (titleEl) titleEl.textContent = 'Alternatives';
+
+      actionsList.className = 'modal-body p-0';
       actionsList.innerHTML = '';
       
+      const listGroup = document.createElement('div');
+      listGroup.className = 'actions-menu';
+
       // Custom Actions
       const customs = getCustomActions();
       customs.forEach(c => {
           const item = document.createElement('a');
-          item.className = 'list-menu-item';
-          item.textContent = c.title;
-          item.href = c.url.replace('<ipaurl>', ipaUrl);
+          item.className = 'action-item';
+          item.href = formatActionUrl(c.url, ipaUrl, app);
           item.onclick = () => actionsModal.classList.remove('flex');
-          item.style.color = 'var(--text-primary)';
-          actionsList.appendChild(item);
+          item.innerHTML = `
+            <span>${c.title}</span>
+            <svg class="action-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+          `;
+          listGroup.appendChild(item);
       });
 
       // Default Actions
       try {
         if (!cachedDefaults) {
-            cachedDefaults = await fetchJSON('assets/data/actions.json');
+            cachedDefaults = await sessionData.actions;
         }
         const hidden = getHiddenDefaults();
         cachedDefaults.forEach(a => {
           if (hidden.includes(a.title)) return;
           const item = document.createElement('a');
-          item.className = 'list-menu-item';
-          item.textContent = a.title;
-          item.href = a.url.replace('<ipaurl>', ipaUrl);
+          item.className = 'action-item';
+          item.href = formatActionUrl(a.url, ipaUrl, app);
           item.onclick = () => actionsModal.classList.remove('flex');
-          actionsList.appendChild(item);
+          item.innerHTML = `
+            <span>${a.title}</span>
+            <svg class="action-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+          `;
+          listGroup.appendChild(item);
         });
       } catch (e) {
         console.error('Failed to load actions', e);
       }
 
+      actionsList.appendChild(listGroup);
+
       // Edit Button
       const editBtn = document.createElement('div');
-      editBtn.className = 'list-menu-item';
-      editBtn.textContent = 'Edit Alternatives';
-      editBtn.style.color = 'var(--text-secondary)';
-      editBtn.style.cursor = 'pointer';
+      editBtn.className = 'action-edit-trigger';
+      editBtn.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <span>Edit Alternatives</span>
+      `;
       editBtn.onclick = (e) => {
           e.stopPropagation();
           renderEditMode();
@@ -541,27 +657,41 @@ function renderHeavy(app) {
   };
 
   const renderEditMode = async () => {
+      const titleEl = $('#actions-modal-title');
+      if (titleEl) titleEl.textContent = 'Edit Alternatives';
+
+      actionsList.className = 'modal-body';
       actionsList.innerHTML = '';
       
-      const listWrapper = document.createElement('div');
-      const formWrapper = document.createElement('div');
-      const doneWrapper = document.createElement('div');
+      const editSection = document.createElement('div');
+      editSection.className = 'edit-section';
+
+      const listContainer = document.createElement('div');
+      const formContainer = document.createElement('div');
       
-      actionsList.appendChild(listWrapper);
-      actionsList.appendChild(formWrapper);
-      actionsList.appendChild(doneWrapper);
+      editSection.appendChild(listContainer);
+      editSection.appendChild(formContainer);
+      actionsList.appendChild(editSection);
 
       // Ensure defaults are loaded
       if (!cachedDefaults) {
-          try { cachedDefaults = await fetchJSON('assets/data/actions.json'); }
+          try { cachedDefaults = await sessionData.actions; }
           catch { cachedDefaults = []; }
       }
 
       const refreshList = () => {
-          listWrapper.innerHTML = '';
+          listContainer.innerHTML = '';
           const customs = getCustomActions();
           const hidden = getHiddenDefaults();
           const defaults = cachedDefaults || [];
+          
+          const header = document.createElement('div');
+          header.className = 'edit-section-header';
+          header.textContent = 'Current Options';
+          listContainer.appendChild(header);
+
+          const listGroup = document.createElement('div');
+          listGroup.className = 'edit-list-group';
           
           const allItems = [
               ...customs.map((c, i) => ({ ...c, type: 'custom', idx: i })),
@@ -570,71 +700,109 @@ function renderHeavy(app) {
 
           if (allItems.length === 0) {
               const empty = document.createElement('div');
-              empty.style.padding = '16px';
-              empty.style.textAlign = 'center';
-              empty.style.color = 'var(--text-secondary)';
-              empty.textContent = 'No alternatives visible.';
-              listWrapper.appendChild(empty);
-          }
-
-      allItems.forEach((item) => {
-              const row = document.createElement('div');
-              row.className = 'edit-row';
-              
-              const name = document.createElement('span');
-              name.textContent = item.title;
-              name.className = 'flex-1';
-              if (item.type === 'custom') name.classList.add('bold');
-              
-              const del = document.createElement('button');
-              del.textContent = 'Delete';
-              del.className = 'red bold';
-              del.onclick = () => {
-                  if (item.type === 'custom') {
-                      const current = getCustomActions();
-                      current.splice(item.idx, 1);
-                      setCustomActions(current);
-                  } else {
-                      const currentHidden = getHiddenDefaults();
-                      if (!currentHidden.includes(item.title)) {
-                          currentHidden.push(item.title);
-                          setHiddenDefaults(currentHidden);
+              empty.className = 'p-16 text-center text-secondary text-small';
+              empty.textContent = 'No alternatives configured.';
+              listGroup.appendChild(empty);
+          } else {
+              allItems.forEach((item) => {
+                  const row = document.createElement('div');
+                  row.className = 'edit-row';
+                  
+                  const info = document.createElement('div');
+                  info.className = 'edit-row-info';
+                  
+                  const title = document.createElement('div');
+                  title.className = 'edit-row-title';
+                  title.innerHTML = `
+                    <span>${item.title}</span>
+                    <span class="edit-badge ${item.type}">${item.type}</span>
+                  `;
+                  
+                  const url = document.createElement('div');
+                  url.className = 'edit-row-url';
+                  url.textContent = item.url;
+                  url.title = item.url;
+                  
+                  info.appendChild(title);
+                  info.appendChild(url);
+                  
+                  const del = document.createElement('button');
+                  del.className = 'btn-delete';
+                  del.textContent = item.type === 'custom' ? 'Delete' : 'Hide';
+                  del.onclick = () => {
+                      if (item.type === 'custom') {
+                          const current = getCustomActions();
+                          current.splice(item.idx, 1);
+                          setCustomActions(current);
+                      } else {
+                          const currentHidden = getHiddenDefaults();
+                          if (!currentHidden.includes(item.title)) {
+                              currentHidden.push(item.title);
+                              setHiddenDefaults(currentHidden);
+                          }
                       }
-                  }
-                  refreshList();
-              };
-              
-              row.appendChild(name);
-              row.appendChild(del);
-              listWrapper.appendChild(row);
-          });
+                      refreshList();
+                  };
+                  
+                  row.appendChild(info);
+                  row.appendChild(del);
+                  listGroup.appendChild(row);
+              });
+          }
+          listContainer.appendChild(listGroup);
 
           // Reset Button (if any defaults hidden)
           if (hidden.length > 0) {
-              const resetBtn = document.createElement('div');
-              resetBtn.className = 'reset-btn';
+              const resetBtn = document.createElement('button');
+              resetBtn.className = 'reset-btn w-full mt-8';
               resetBtn.textContent = 'Reset Default Alternatives';
               resetBtn.onclick = () => {
                   setHiddenDefaults([]);
                   refreshList();
               };
-              listWrapper.appendChild(resetBtn);
+              listContainer.appendChild(resetBtn);
           }
       };
 
-      // Add New Form (Rendered once)
-      formWrapper.className = 'edit-form';
-      formWrapper.innerHTML = `
-        <div class="mb-8 bold text-small">Add New</div>
-        <input id="new-act-title" placeholder="Title" class="edit-input">
-        <input id="new-act-url" placeholder="URL (<ipaurl> as placeholder)" class="edit-input">
-        <div class="mb-8 text-secondary text-tiny">Use <code>&lt;ipaurl&gt;</code> to insert the IPA link.</div>
-        <button id="add-act-btn" class="btn-primary w-full">Add</button>
+      // Form Setup
+      formContainer.innerHTML = `
+        <div class="edit-section-header">Add Custom Alternative</div>
+        <div class="list-group mb-12">
+          <div class="info-row">
+            <input id="new-act-title" placeholder="Name (e.g. TrollStore, AltStore, Sideloadly)" class="input-minimal">
+          </div>
+          <div class="info-row">
+            <input id="new-act-url" placeholder="URL Scheme (e.g. apple-magnifier://<ipaurl>)" class="input-minimal">
+          </div>
+        </div>
+        <div class="text-secondary text-tiny mb-6" style="padding-left: 4px;">Tap placeholder to insert:</div>
+        <div class="placeholder-chips">
+          <button type="button" class="placeholder-chip" data-val="<ipaurl>">&lt;ipaurl&gt;</button>
+          <button type="button" class="placeholder-chip" data-val="<sourcename>">&lt;sourcename&gt;</button>
+          <button type="button" class="placeholder-chip" data-val="<sourceurl>">&lt;sourceurl&gt;</button>
+        </div>
+        <button id="add-act-btn" class="btn-primary w-full mb-12">Add Alternative</button>
+        <button id="done-act-btn" class="btn-secondary w-full">Done</button>
       `;
-      
-      const addBtn = formWrapper.querySelector('#add-act-btn');
-      const titleInp = formWrapper.querySelector('#new-act-title');
-      const urlInp = formWrapper.querySelector('#new-act-url');
+
+      const addBtn = formContainer.querySelector('#add-act-btn');
+      const doneBtn = formContainer.querySelector('#done-act-btn');
+      const titleInp = formContainer.querySelector('#new-act-title');
+      const urlInp = formContainer.querySelector('#new-act-url');
+
+      // Clickable placeholder chips
+      formContainer.querySelectorAll('.placeholder-chip').forEach(chip => {
+        chip.onclick = (e) => {
+          e.preventDefault();
+          const val = chip.dataset.val;
+          const start = urlInp.selectionStart || urlInp.value.length;
+          const end = urlInp.selectionEnd || urlInp.value.length;
+          const current = urlInp.value;
+          urlInp.value = current.substring(0, start) + val + current.substring(end);
+          urlInp.focus();
+          urlInp.selectionStart = urlInp.selectionEnd = start + val.length;
+        };
+      });
 
       addBtn.onclick = () => {
           const t = titleInp.value.trim();
@@ -649,14 +817,7 @@ function renderHeavy(app) {
           }
       };
 
-      // Done Button (Rendered once)
-      const doneBtn = document.createElement('div');
-      doneBtn.className = 'list-menu-item';
-      doneBtn.textContent = 'Done';
-      doneBtn.style.fontWeight = '600';
-      doneBtn.style.cursor = 'pointer';
       doneBtn.onclick = renderActionsList;
-      doneWrapper.appendChild(doneBtn);
 
       refreshList();
   };

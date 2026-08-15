@@ -1,4 +1,4 @@
-import { $, ellipsize, parseDateString, qs, debounce, cdnify, observeSmartImage, PLACEHOLDER_SRC } from '../core/utils.js';
+import { $, ellipsize, parseDateString, qs, debounce, cdnify, getProxiedImageUrl, isDdgErrorImage, observeSmartImage, PLACEHOLDER_SRC } from '../core/utils.js';
 import { streamRepos } from '../core/repo.js';
 import { getSources } from '../core/sources.js';
 import { initSearch, searchApps } from '../core/search.js';
@@ -29,10 +29,10 @@ async function loadAll() {
   showSkeleton();
 
   let showTimeout = setTimeout(() => {
-    if (!state.initialized && state.allMerged.length > 0) {
+    if (!state.initialized) {
        finishLoading();
     }
-  }, 4000); // Max 4 seconds on splash if we have some data
+  }, 4000); // Max 4 seconds on splash guarantee
 
   const finishLoading = () => {
     if (state.initialized) return;
@@ -160,17 +160,39 @@ function renderFeatured() {
     
     observeSmartImage(icon);
 
+    const all = a.allIcons || (a.icon ? [a.icon] : []);
     icon.dataset.idx = 0;
+    icon.dataset.ddgTried = '0';
+    icon.onload = () => {
+      if (icon.src === PLACEHOLDER_SRC) return;
+      if (isDdgErrorImage(icon)) {
+        icon.onerror();
+      }
+    };
     icon.onerror = () => {
       if (icon.src === PLACEHOLDER_SRC) return;
-      const all = a.allIcons || [];
-      let idx = parseInt(icon.dataset.idx || '0') + 1;
+      const curIdx = parseInt(icon.dataset.idx || '0');
+      const curUrl = all[curIdx] || a.icon;
+
+      if (icon.dataset.ddgTried !== '1') {
+        icon.dataset.ddgTried = '1';
+        const proxied = getProxiedImageUrl(curUrl ? cdnify(curUrl) : icon.dataset.src);
+        if (proxied) {
+          icon.dataset.src = proxied;
+          icon.src = proxied;
+          return;
+        }
+      }
+
+      icon.dataset.ddgTried = '0';
+      let idx = curIdx + 1;
       if (idx < all.length) {
         icon.dataset.idx = idx;
         icon.dataset.src = cdnify(all[idx]);
         icon.src = icon.dataset.src;
       } else {
         icon.onerror = null;
+        icon.onload = null;
         icon.dataset.src = 'assets/img/placeholder.png';
         icon.src = icon.dataset.src;
       }
@@ -262,8 +284,23 @@ function renderNews() {
       
       observeSmartImage(img);
       
+      img.onload = () => {
+        if (img.src === PLACEHOLDER_SRC) return;
+        if (isDdgErrorImage(img)) {
+          img.onerror();
+        }
+      };
       img.onerror = () => {
         if (img.src === PLACEHOLDER_SRC) return;
+        if (!img.dataset.ddgTried) {
+          img.dataset.ddgTried = 'true';
+          const proxied = getProxiedImageUrl(cdnify(n.image));
+          if (proxied) {
+            img.dataset.src = proxied;
+            img.src = proxied;
+            return;
+          }
+        }
         const placeholder = document.createElement('div');
         placeholder.className = 'news-placeholder';
         img.replaceWith(placeholder);
