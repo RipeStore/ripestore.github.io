@@ -190,11 +190,32 @@ export async function fetchRepo(src, force = false) {
 
   const url = src.includes('://') ? src : `${CFG.INTERNAL_REPO_BASE}${src}.json`;
   
+  let text = null;
+
+  // 1. Try original URL directly
   try {
     const response = await fetch(url, { cache: 'no-cache' });
     if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
-    
-    const text = await response.text();
+    text = await response.text();
+  } catch (directErr) {
+    // 2. If direct fetch fails and it's a GitHub raw URL, try jsDelivr CDN fallback
+    const cdnUrl = cdnify(url);
+    if (cdnUrl !== url) {
+      try {
+        const cdnResp = await fetch(cdnUrl, { cache: 'no-cache' });
+        if (!cdnResp.ok) throw new Error(`CDN fallback failed ${cdnResp.status}`);
+        text = await cdnResp.text();
+      } catch (cdnErr) {
+        if (cached) return { ...cached.data, changed: false };
+        throw directErr;
+      }
+    } else {
+      if (cached) return { ...cached.data, changed: false };
+      throw directErr;
+    }
+  }
+
+  try {
     const hash = hashString(text);
 
     if (cached && cached.hash === hash && !force) {

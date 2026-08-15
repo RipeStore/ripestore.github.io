@@ -39,21 +39,25 @@ async function loadAll() {
     state.initialized = true;
     clearTimeout(showTimeout);
     
-    renderFeatured();
-    renderNews();
-    initSearch(state.allMerged);
-    filterAndPrepare();
+    try { renderFeatured(); } catch(e) { console.error('renderFeatured failed', e); }
+    try { renderNews(); } catch(e) { console.error('renderNews failed', e); }
+    try { initSearch(state.allMerged); } catch(e) { console.error('initSearch failed', e); }
+    try { filterAndPrepare(); } catch(e) { console.error('filterAndPrepare failed', e); }
 
     if (state.allMerged.length === 0) {
-      const sources = getSources();
-      if (sources.length === 0) {
-        renderError($('main'), 'No Sources Added', 'You haven\'t added any app sources yet. Add a repository to discover apps.', { text: 'Manage Sources', href: 'sources.html' });
-      } else {
-        renderError($('main'), 'Failed to Load Apps', 'We couldn\'t load any apps from your sources. Please check your internet connection or manage your sources.', { text: 'Manage Sources', href: 'sources.html' });
+      try {
+        const sources = getSources();
+        if (sources.length === 0) {
+          renderError($('main'), 'No Sources Added', 'You haven\'t added any app sources yet. Add a repository to discover apps.', { text: 'Manage Sources', href: 'sources.html' });
+        } else {
+          renderError($('main'), 'Failed to Load Apps', 'We couldn\'t load any apps from your sources. Please check your internet connection or manage your sources.', { text: 'Manage Sources', href: 'sources.html' });
+        }
+      } catch (e) {
+        console.error('renderError failed', e);
       }
     }
 
-    removeSplash();
+    try { removeSplash(); } catch(e) { console.error('removeSplash failed', e); }
   };
 
   await streamRepos(

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
@@ -22,7 +23,7 @@
   <meta name="twitter:description" content="An alternative iOS app store for discovering and sideloading apps.">
   <meta name="twitter:image" content="https://ripestore.github.io/icon-192.png">
   <link rel="stylesheet" href="assets/css/style.css?v=8">
-  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js" data-cfasync="false"></script>
 
   <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
   <link rel="icon" type="image/png" sizes="96x96" href="/icon-96x96.png">
@@ -103,6 +104,6 @@
     </section>
   </main>
 
-  <script type="module" src="assets/js/ui/home.js?v=8"></script>
+  <script type="module" data-cfasync="false" src="assets/js/ui/home.js?v=8"></script>
 </body>
 </html>

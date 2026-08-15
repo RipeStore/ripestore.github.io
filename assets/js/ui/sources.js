@@ -1,4 +1,4 @@
-import { $, fetchJSON, showToast, setupModal } from '../core/utils.js';
+import { $, fetchJSON, showToast, setupModal, cdnify } from '../core/utils.js';
 import { fetchRepo } from '../core/repo.js';
 import { getSources, setSources, getOrigins, setOrigins, addSource as coreAddSource, removeSource } from '../core/sources.js';
 import { removeSplash } from './components.js';
@@ -137,7 +137,18 @@ async function addSourceWrapper(v, type = 'manual') {
 
 async function initSuggestions() {
   try {
-    const data = await fetchJSON(SUGGESTIONS_URL + '?t=' + Date.now());
+    let data = null;
+    try {
+      data = await fetchJSON(SUGGESTIONS_URL + '?t=' + Date.now());
+    } catch (directErr) {
+      const cdnUrl = cdnify(SUGGESTIONS_URL);
+      if (cdnUrl !== SUGGESTIONS_URL) {
+        data = await fetchJSON(cdnUrl);
+      } else {
+        throw directErr;
+      }
+    }
+
     if (Array.isArray(data)) {
       allSuggestions = data;
       
