@@ -1,7 +1,8 @@
-import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, getProxiedImageUrl, isDdgErrorImage, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta } from '../core/utils.js';
+import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, getProxiedImageUrl, isDdgErrorImage, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta, db } from '../core/utils.js';
 import { normalizeRepo, fetchRepo } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
+import { DEFAULTS as CFG } from '../core/config.js';
 import { getDominantColor, ensureContrast } from '../core/color.js';
 import { removeSplash, getSourceLabel, renderError } from './components.js';
 
@@ -37,6 +38,56 @@ const sessionData = {
   })
 };
 
+async function enrichAppFromSources(app, bundle) {
+  if (!app || !bundle) return app;
+  
+  const combinedIcons = new Set(app.allIcons || (app.icon ? [app.icon] : []));
+  let bestScreenshots = (app.screenshots && (app.screenshots.iphone?.length || app.screenshots.ipad?.length)) ? app.screenshots : null;
+  let bestIcon = app.icon || null;
+
+  try {
+    // 1. Check master cache first (instant)
+    const master = await db.get(CFG.MASTER_CACHE_KEY);
+    if (master && master.data && master.data.apps) {
+      const matches = master.data.apps.filter(a => a.bundle === bundle);
+      for (const m of matches) {
+        if (!bestIcon && m.icon) bestIcon = m.icon;
+        if (!bestScreenshots && (m.screenshots?.iphone?.length || m.screenshots?.ipad?.length)) {
+          bestScreenshots = m.screenshots;
+        }
+        if (m.allIcons && Array.isArray(m.allIcons)) m.allIcons.forEach(i => i && combinedIcons.add(i));
+        else if (m.icon) combinedIcons.add(m.icon);
+      }
+    }
+
+    // 2. Check normalized cache of all configured sources
+    const sources = getSources();
+    for (const src of sources) {
+      const norm = await db.get('norm_cache_' + src);
+      if (norm && norm.apps) {
+        const matches = norm.apps.filter(a => a.bundle === bundle);
+        for (const m of matches) {
+          if (!bestIcon && m.icon) bestIcon = m.icon;
+          if (!bestScreenshots && (m.screenshots?.iphone?.length || m.screenshots?.ipad?.length)) {
+            bestScreenshots = m.screenshots;
+          }
+          if (m.allIcons && Array.isArray(m.allIcons)) m.allIcons.forEach(i => i && combinedIcons.add(i));
+          else if (m.icon) combinedIcons.add(m.icon);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to enrich app from other sources', e);
+  }
+
+  if (bestIcon && !app.icon) app.icon = bestIcon;
+  if (bestScreenshots && (!app.screenshots || (!app.screenshots.iphone?.length && !app.screenshots.ipad?.length))) {
+    app.screenshots = bestScreenshots;
+  }
+  app.allIcons = Array.from(combinedIcons).filter(Boolean);
+  return app;
+}
+
 async function init() {
   const bundle = qs('bundle');
   const repo = qs('repo');
@@ -70,26 +121,37 @@ async function init() {
       if (!nameParam) return matchBundle;
       return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
     });
-    
-    if (app) {
-      // Sort versions initially
-      sortVersions(app);
-      render(app, versionParam);
-      removeSplash();
-      return;
-    }
   } catch (e) {
-    console.error('Primary repo fetch failed', e);
-    renderError($('main'), 'Connection Error', `Failed to load the repository: ${repo}. Please check your internet connection or the source URL.`);
-    removeSplash();
-    return;
+    console.warn('Primary repo fetch failed, checking cached sources', e);
   }
 
   // 2. Fallback: Search in other repos if not found in primary
   if (!app) {
-    renderError($('main'), 'App Not Found', `The app with bundle ID "<strong>${bundle}</strong>" could not be found in the specified repository.`);
-    removeSplash();
+    try {
+      const sources = getSources();
+      for (const src of sources) {
+        if (src === repo) continue;
+        const norm = await db.get('norm_cache_' + src);
+        if (norm && norm.apps) {
+          app = norm.apps.find(a => a.bundle === bundle && (!nameParam || a.name.toLowerCase() === nameParam.toLowerCase()));
+          if (app) break;
+        }
+      }
+    } catch (e) {
+      console.warn('Fallback search in sources failed', e);
+    }
   }
+
+  if (app) {
+    await enrichAppFromSources(app, bundle);
+    sortVersions(app);
+    render(app, versionParam);
+    removeSplash();
+    return;
+  }
+
+  renderError($('main'), 'App Not Found', `The app with bundle ID "<strong>${bundle}</strong>" could not be found.`);
+  removeSplash();
 }
 
 function sortVersions(app) {
@@ -107,6 +169,9 @@ function sortVersions(app) {
 }
 
 function render(app, initialVersion) {
+  const all = (app.allIcons && app.allIcons.length > 0) ? app.allIcons : (app.icon ? [app.icon] : []);
+  const initialIcon = app.icon || all[0] || 'assets/img/placeholder.png';
+
   // Apply tint color logic
   let currentBaseAccent = app.tintColor;
   
@@ -124,12 +189,12 @@ function render(app, initialVersion) {
   
   if (currentBaseAccent) {
       updateAccent();
-  } else {
+  } else if (initialIcon && initialIcon !== 'assets/img/placeholder.png') {
       document.documentElement.style.removeProperty('--accent');
       // Extract from hidden image to avoid CORS issues on display image
       const img = new Image();
       img.crossOrigin = "Anonymous";
-      img.src = cdnify(app.icon);
+      img.src = cdnify(initialIcon);
       img.onload = async () => {
           if (isDdgErrorImage(img)) {
               img.onerror();
@@ -145,7 +210,7 @@ function render(app, initialVersion) {
       img.onerror = () => {
           if (!colorDdgTried) {
               colorDdgTried = true;
-              const proxied = getProxiedImageUrl(cdnify(app.icon));
+              const proxied = getProxiedImageUrl(cdnify(initialIcon));
               if (proxied) {
                   img.src = proxied;
               }
@@ -162,8 +227,7 @@ function render(app, initialVersion) {
       document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(tag => tag.href = url);
   };
   
-  const all = app.allIcons || (app.icon ? [app.icon] : []);
-  heroIcon.dataset.src = cdnify(app.icon);
+  heroIcon.dataset.src = cdnify(initialIcon);
   heroIcon.src = PLACEHOLDER_SRC;
   observeSmartImage(heroIcon);
   updateFavicon(heroIcon.dataset.src);
@@ -178,7 +242,7 @@ function render(app, initialVersion) {
   heroIcon.onerror = () => {
       if (heroIcon.src === PLACEHOLDER_SRC) return;
       const curIdx = parseInt(heroIcon.dataset.idx || '0');
-      const curUrl = all[curIdx] || app.icon;
+      const curUrl = all[curIdx] || initialIcon;
 
       if (heroIcon.dataset.ddgTried !== '1') {
           heroIcon.dataset.ddgTried = '1';
