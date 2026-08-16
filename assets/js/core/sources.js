@@ -24,6 +24,7 @@ export async function setSources(arr) {
     await db.remove('ripe_master_cache');
     await db.remove('ripe_master_cache_v2');
     await db.remove('ripe_master_cache_v3');
+    await db.remove('ripe_master_cache_v4');
   } catch (e) {}
 }
 
