@@ -79,8 +79,7 @@ export function buildAppCard(app) {
   sub.className = 'app-sub';
   
   const subtitle = app.subtitle || app.dev || '';
-  const sourceName = app.repoName || getSourceLabel({ source: app.source });
-  const parts = [ver, sourceName, subtitle].filter(p => p && p.trim().length > 0);
+  const parts = [ver, subtitle].filter(p => p && p.trim().length > 0);
   sub.textContent = parts.join(' • ');
   
   const btn = document.createElement('button');
@@ -92,6 +91,15 @@ export function buildAppCard(app) {
   card.appendChild(icon);
   card.appendChild(meta);
   card.appendChild(btn);
+
+  const sourceName = app.repoName || getSourceLabel({ source: app.source });
+  if (sourceName) {
+    const srcTag = document.createElement('span');
+    srcTag.className = 'app-source-tag';
+    srcTag.textContent = sourceName;
+    srcTag.title = sourceName;
+    card.appendChild(srcTag);
+  }
   
   return card;
 }

@@ -97,11 +97,14 @@ function updateRowContent(row, url) {
 function renderSuggestions() {
   const list = getSources();
   
-  // Add RipeStore to suggestions if not installed
+  // Add default repos to suggestions if not installed
   const suggestions = [...allSuggestions];
-  if (!list.includes(CFG.SOURCE_NAME) && !suggestions.some(s => s.name === CFG.SOURCE_NAME)) {
-      suggestions.unshift({ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL });
-  }
+  const defaultRepos = CFG.DEFAULT_REPOS || [{ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL }];
+  defaultRepos.forEach(def => {
+    if (!list.includes(def.name) && !suggestions.some(s => s.name === def.name)) {
+      suggestions.unshift(def);
+    }
+  });
 
   const available = suggestions.filter(r => !list.includes(r.name));
   available.sort((a, b) => a.name.localeCompare(b.name));
@@ -137,17 +140,7 @@ async function addSourceWrapper(v, type = 'manual') {
 
 async function initSuggestions() {
   try {
-    let data = null;
-    try {
-      data = await fetchJSON(SUGGESTIONS_URL + '?t=' + Date.now());
-    } catch (directErr) {
-      const cdnUrl = cdnify(SUGGESTIONS_URL);
-      if (cdnUrl !== SUGGESTIONS_URL) {
-        data = await fetchJSON(cdnUrl);
-      } else {
-        throw directErr;
-      }
-    }
+    const data = await fetchJSON(SUGGESTIONS_URL + '?t=' + Date.now());
 
     if (Array.isArray(data)) {
       allSuggestions = data;
@@ -156,7 +149,8 @@ async function initSuggestions() {
       const list = getSources();
       const origins = getOrigins();
       const suggestionNames = new Set(data.map(d => d.name));
-      suggestionNames.add(CFG.SOURCE_NAME); // Protect RipeStore
+      const defaultSources = CFG.DEFAULT_SOURCES || [CFG.SOURCE_NAME];
+      defaultSources.forEach(s => suggestionNames.add(s)); // Protect default sources (RipeStore, AltMaker)
 
       let changed = false;
       const newList = list.filter(src => {
@@ -232,9 +226,12 @@ removeSplash();
 function resolveSourcesToUrls() {
   const list = getSources();
   const suggestions = [...allSuggestions];
-  if (!suggestions.some(s => s.name === CFG.SOURCE_NAME)) {
-    suggestions.push({ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL });
-  }
+  const defaultRepos = CFG.DEFAULT_REPOS || [{ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL }];
+  defaultRepos.forEach(def => {
+    if (!suggestions.some(s => s.name === def.name)) {
+      suggestions.push(def);
+    }
+  });
 
   return list.map(src => {
     if (src.includes('://')) return src;

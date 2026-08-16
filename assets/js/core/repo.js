@@ -198,16 +198,24 @@ export async function fetchRepo(src, force = false) {
     if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
     text = await response.text();
   } catch (directErr) {
-    // 2. If direct fetch fails and it's a GitHub raw URL, try jsDelivr CDN fallback
+    // 2. If direct fetch fails and it's a GitHub raw URL, try jsDelivr CDN fallback (temporary for current session/cache)
     const cdnUrl = cdnify(url);
     if (cdnUrl !== url) {
+      const sep = cdnUrl.includes('?') ? '&' : '?';
+      const cdnFetchUrl = `${cdnUrl}${sep}t=${now}`;
       try {
-        const cdnResp = await fetch(cdnUrl, { cache: 'no-cache' });
+        const cdnResp = await fetch(cdnFetchUrl, { cache: 'no-cache' });
         if (!cdnResp.ok) throw new Error(`CDN fallback failed ${cdnResp.status}`);
         text = await cdnResp.text();
       } catch (cdnErr) {
-        if (cached) return { ...cached.data, changed: false };
-        throw directErr;
+        try {
+          const cdnRespBare = await fetch(cdnUrl, { cache: 'no-cache' });
+          if (!cdnRespBare.ok) throw new Error(`CDN bare fallback failed ${cdnRespBare.status}`);
+          text = await cdnRespBare.text();
+        } catch (_) {
+          if (cached) return { ...cached.data, changed: false };
+          throw directErr;
+        }
       }
     } else {
       if (cached) return { ...cached.data, changed: false };

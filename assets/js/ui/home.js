@@ -3,7 +3,7 @@ import { streamRepos } from '../core/repo.js';
 import { getSources } from '../core/sources.js';
 import { initSearch, searchApps } from '../core/search.js';
 import { initCarousel } from '../core/carousel.js';
-import { removeSplash, buildAppCard, renderError } from './components.js';
+import { removeSplash, buildAppCard, getSourceLabel, renderError } from './components.js';
 
 const BATCH = 24;
 
@@ -212,15 +212,23 @@ function renderFeatured() {
     const sub = document.createElement('div');
     sub.className = 'featured-subtitle';
     const ver = a.currentVersion;
-    const sourceName = a.repoName || getSourceLabel({ source: a.source });
     const subText = a.subtitle || a.desc || 'Featured App';
-    const parts = [ver, sourceName, ellipsize(subText, 45)].filter(p => p && p.trim().length > 0);
+    const parts = [ver, ellipsize(subText, 45)].filter(p => p && p.trim().length > 0);
     sub.textContent = parts.join(' • ');
     
     info.appendChild(title);
     info.appendChild(sub);
     card.appendChild(icon);
     card.appendChild(info);
+
+    const sourceName = a.repoName || getSourceLabel({ source: a.source });
+    if (sourceName) {
+      const srcTag = document.createElement('span');
+      srcTag.className = 'app-source-tag';
+      srcTag.textContent = sourceName;
+      srcTag.title = sourceName;
+      card.appendChild(srcTag);
+    }
     
     grid.appendChild(card);
   });

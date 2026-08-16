@@ -85,17 +85,69 @@ export const db = {
   },
 
   async get(k) {
+    if (this._mem.has(k)) return this._mem.get(k);
     const idb = await this._getDB();
-    if (!idb) return this._mem.has(k) ? this._mem.get(k) : null;
+    if (!idb) return null;
     return new Promise((resolve) => {
       try {
         const trans = idb.transaction('kv', 'readonly');
         const req = trans.objectStore('kv').get(k);
-        req.onsuccess = () => resolve(req.result !== undefined ? req.result : (this._mem.has(k) ? this._mem.get(k) : null));
-        req.onerror = () => resolve(this._mem.has(k) ? this._mem.get(k) : null);
-        trans.onabort = () => resolve(this._mem.has(k) ? this._mem.get(k) : null);
+        req.onsuccess = () => {
+          if (req.result !== undefined) {
+            this._mem.set(k, req.result);
+            resolve(req.result);
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+        trans.onabort = () => resolve(null);
       } catch (e) {
-        resolve(this._mem.has(k) ? this._mem.get(k) : null);
+        resolve(null);
+      }
+    });
+  },
+
+  async getMany(keys) {
+    if (!Array.isArray(keys) || keys.length === 0) return {};
+    const results = {};
+    const missingKeys = [];
+    
+    for (const k of keys) {
+      if (this._mem.has(k)) {
+        results[k] = this._mem.get(k);
+      } else {
+        missingKeys.push(k);
+      }
+    }
+    
+    if (missingKeys.length === 0) return results;
+    
+    const idb = await this._getDB();
+    if (!idb) return results;
+
+    return new Promise((resolve) => {
+      try {
+        const trans = idb.transaction('kv', 'readonly');
+        const store = trans.objectStore('kv');
+        let remaining = missingKeys.length;
+        
+        missingKeys.forEach((k) => {
+          const req = store.get(k);
+          req.onsuccess = () => {
+            if (req.result !== undefined) {
+              this._mem.set(k, req.result);
+              results[k] = req.result;
+            }
+            if (--remaining === 0) resolve(results);
+          };
+          req.onerror = () => {
+            if (--remaining === 0) resolve(results);
+          };
+        });
+        trans.onabort = () => resolve(results);
+      } catch (e) {
+        resolve(results);
       }
     });
   },
@@ -174,18 +226,86 @@ export function qs(k) {
 }
 
 /**
- * Fetches and parses JSON from a URL.
+ * Fetches and parses JSON from a URL with automatic jsDelivr CDN fallback.
  */
 export async function fetchJSON(url) {
-  const res = await fetch(url, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status}`);
-  const text = await res.text();
+  let text = null;
+  try {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`Fetch failed ${res.status}`);
+    text = await res.text();
+  } catch (directErr) {
+    const cdnUrl = cdnify(url);
+    if (cdnUrl !== url) {
+      const sep = cdnUrl.includes('?') ? '&' : '?';
+      const cdnUrlBusted = `${cdnUrl}${sep}t=${Date.now()}`;
+      try {
+        const cdnResp = await fetch(cdnUrlBusted, { cache: 'no-cache' });
+        if (!cdnResp.ok) throw new Error(`CDN fetch failed ${cdnResp.status}`);
+        text = await cdnResp.text();
+      } catch (cdnErr) {
+        try {
+          const cdnRespBare = await fetch(cdnUrl, { cache: 'no-cache' });
+          if (!cdnRespBare.ok) throw new Error(`CDN bare fetch failed ${cdnRespBare.status}`);
+          text = await cdnRespBare.text();
+        } catch (_) {
+          throw directErr;
+        }
+      }
+    } else {
+      throw directErr;
+    }
+  }
+
   try {
     return JSON.parse(text);
   } catch (_) {}
   const m = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!m) throw new Error("Invalid JSON payload");
   return JSON.parse(m[0]);
+}
+
+/**
+ * Prettifies raw URLs for display while preserving the actual href.
+ */
+function cleanUrlText(href, innerText) {
+  const normInner = (innerText || '').trim();
+  const normHref = (href || '').trim();
+  
+  let isBare = false;
+  try {
+    isBare = normInner === normHref || 
+             decodeURIComponent(normInner) === decodeURIComponent(normHref) ||
+             normInner.startsWith('http://') || 
+             normInner.startsWith('https://');
+  } catch (e) {
+    isBare = normInner === normHref;
+  }
+
+  if (!isBare) return innerText;
+
+  try {
+    let decoded = decodeURIComponent(normInner);
+    let clean = decoded.replace(/^https?:\/\/(www\.)?/i, '');
+    if (clean.endsWith('/') && !clean.slice(0, -1).includes('/')) {
+      clean = clean.slice(0, -1);
+    }
+    
+    if (clean.length > 55) {
+      const parts = clean.split('/');
+      if (parts.length > 3) {
+        const domain = parts[0];
+        const firstSegment = parts[1];
+        const lastSegment = parts[parts.length - 1] || parts[parts.length - 2];
+        clean = `${domain}/${firstSegment}/…/${lastSegment}`;
+      } else {
+        clean = clean.substring(0, 32) + '…' + clean.substring(clean.length - 18);
+      }
+    }
+    return clean;
+  } catch (e) {
+    return innerText;
+  }
 }
 
 /**
@@ -228,7 +348,11 @@ export function linkify(text) {
     return `<div class="gh-alert gh-alert-${t}"><div class="gh-alert-title">${icons[t]} ${title}</div><div class="gh-alert-content"><p>${content}</p></div></div>`;
   });
   
-  html = html.replace(/<a /g, '<a class="accent" target="_blank" rel="noopener noreferrer" ');
+  html = html.replace(/<a\s+href="([^"]+)"([^>]*)>([\s\S]*?)<\/a>/gi, (match, href, attrs, innerText) => {
+    const cleanText = cleanUrlText(href, innerText);
+    const titleAttr = href ? ` title="${href.replace(/"/g, '&quot;')}"` : '';
+    return `<a class="accent" target="_blank" rel="noopener noreferrer"${titleAttr} href="${href}"${attrs}>${cleanText}</a>`;
+  });
   
   return html;
 }
@@ -443,18 +567,26 @@ export function cdnify(url) {
   if (typeof url !== 'string') return url;
   
   let cleanUrl = url.trim();
+  if (!cleanUrl) return url;
+
+  // Normalize http to https
+  if (cleanUrl.toLowerCase().startsWith('http://')) {
+    cleanUrl = 'https://' + cleanUrl.substring(7);
+  }
   
-  // Handle github.com/.../raw/... URLs
-  if (cleanUrl.toLowerCase().startsWith('https://github.com/') && cleanUrl.includes('/raw/')) {
-    cleanUrl = cleanUrl.replace(/https:\/\/github\.com\//i, 'https://raw.githubusercontent.com/').replace(/\/raw\//i, '/');
+  // Handle github.com/.../(raw|blob)/... URLs
+  if (cleanUrl.toLowerCase().startsWith('https://github.com/')) {
+    const ghMatch = cleanUrl.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/(?:raw|blob)\/(.+)$/i);
+    if (ghMatch) {
+      cleanUrl = `https://raw.githubusercontent.com/${ghMatch[1]}/${ghMatch[2]}/${ghMatch[3]}`;
+    }
   }
 
   if (!cleanUrl.toLowerCase().startsWith('https://raw.githubusercontent.com/')) return url;
   
   try {
-    // Strip the protocol and domain
-    const clean = cleanUrl.substring(cleanUrl.indexOf('raw.githubusercontent.com/') + 26);
-    const parts = clean.split('/');
+    const path = cleanUrl.substring(cleanUrl.toLowerCase().indexOf('raw.githubusercontent.com/') + 26);
+    const parts = path.split('/');
     if (parts.length < 3) return url;
     
     const user = parts[0];
@@ -462,15 +594,17 @@ export function cdnify(url) {
     let branch = parts[2];
     let pathParts = parts.slice(3);
     
-    // Special handling for refs/heads which might appear in some raw urls constructed manually
-    if (branch === 'refs' && pathParts[0] === 'heads') {
-        branch = pathParts[1];
-        pathParts = pathParts.slice(2);
+    // Handle refs/heads/branch or refs/tags/tag
+    if (branch === 'refs' && (pathParts[0] === 'heads' || pathParts[0] === 'tags')) {
+      branch = pathParts[1];
+      pathParts = pathParts.slice(2);
     }
     
-    // Remove query params or hashes (jsDelivr rejects these)
+    // Strip query parameters and hash fragments from file path
     let pathStr = pathParts.join('/');
     pathStr = pathStr.split('?')[0].split('#')[0];
+    
+    if (!user || !repo || !branch || !pathStr) return url;
     
     return `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${pathStr}`;
   } catch (e) {

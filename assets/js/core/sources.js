@@ -4,7 +4,7 @@ import { DEFAULTS as CFG } from './config.js';
 
 const KEY = 'ripe_sources';
 const ORIGIN_KEY = 'ripe_source_origins';
-const DEFAULTS = [CFG.SOURCE_NAME];
+const DEFAULTS = CFG.DEFAULT_SOURCES || [CFG.SOURCE_NAME];
 
 /**
  * Gets the list of configured source URLs.

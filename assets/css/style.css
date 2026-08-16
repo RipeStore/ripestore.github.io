@@ -347,6 +347,7 @@ main {
 
 /* Featured Card */
 .featured-card {
+  position: relative;
   flex: 0 0 85%;
   max-width: 320px;
   scroll-snap-align: center;
@@ -561,6 +562,7 @@ main {
 
 /* App Item (List/Grid) */
 .app-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -569,6 +571,31 @@ main {
   border-radius: var(--radius-m);
   transition: background 0.2s;
   box-shadow: 0 1px 4px rgba(0,0,0,0.02);
+}
+
+.app-source-tag {
+  position: absolute;
+  bottom: 6px;
+  right: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 0.55;
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  line-height: 1.2;
+}
+
+@media (max-width: 700px) {
+  .app-source-tag {
+    bottom: 4px;
+    right: 2px;
+    font-size: 10px;
+    max-width: 95px;
+  }
 }
 
 /* Skeleton */

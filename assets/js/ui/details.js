@@ -60,10 +60,11 @@ async function enrichAppFromSources(app, bundle) {
       }
     }
 
-    // 2. Check normalized cache of all configured sources
+    // 2. Check normalized cache of all configured sources in a single batch
     const sources = getSources();
+    const normMap = await db.getMany(sources.map(src => 'norm_cache_' + src));
     for (const src of sources) {
-      const norm = await db.get('norm_cache_' + src);
+      const norm = normMap['norm_cache_' + src];
       if (norm && norm.apps) {
         const matches = norm.apps.filter(a => a.bundle === bundle);
         for (const m of matches) {
@@ -110,28 +111,43 @@ async function init() {
 
   let app = null;
 
-  // 1. Fast path: Fetch primary repo
+  // 1. Ultra-fast path: Check master cache in IndexedDB (0ms hit if user browsed home/list)
   try {
-    const primary = await fetchRepo(repo);
-    const norm = normalizeRepo(primary.data, primary.url);
-    
-    // Find by bundle AND name if available, otherwise just bundle
-    app = norm.apps.find(a => {
-      const matchBundle = a.bundle === bundle;
-      if (!nameParam) return matchBundle;
-      return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
-    });
-  } catch (e) {
-    console.warn('Primary repo fetch failed, checking cached sources', e);
+    const master = await db.get(CFG.MASTER_CACHE_KEY);
+    if (master && master.data && master.data.apps) {
+      app = master.data.apps.find(a => {
+        const matchBundle = a.bundle === bundle;
+        if (!nameParam) return matchBundle;
+        return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
+      });
+    }
+  } catch (_) {}
+
+  // 2. Fast path: Fetch primary repo (checks IDB repo_cache_ first)
+  if (!app) {
+    try {
+      const primary = await fetchRepo(repo);
+      const norm = normalizeRepo(primary.data, primary.url);
+      
+      // Find by bundle AND name if available, otherwise just bundle
+      app = norm.apps.find(a => {
+        const matchBundle = a.bundle === bundle;
+        if (!nameParam) return matchBundle;
+        return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
+      });
+    } catch (e) {
+      console.warn('Primary repo fetch failed, checking cached sources', e);
+    }
   }
 
-  // 2. Fallback: Search in other repos if not found in primary
+  // 3. Fallback: Search in other repos if not found in primary
   if (!app) {
     try {
       const sources = getSources();
-      for (const src of sources) {
-        if (src === repo) continue;
-        const norm = await db.get('norm_cache_' + src);
+      const otherSources = sources.filter(src => src !== repo);
+      const normMap = await db.getMany(otherSources.map(src => 'norm_cache_' + src));
+      for (const src of otherSources) {
+        const norm = normMap['norm_cache_' + src];
         if (norm && norm.apps) {
           app = norm.apps.find(a => a.bundle === bundle && (!nameParam || a.name.toLowerCase() === nameParam.toLowerCase()));
           if (app) break;
