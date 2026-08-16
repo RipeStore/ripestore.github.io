@@ -836,9 +836,6 @@ main {
   word-wrap: break-word;
   overflow-wrap: break-word;
   word-break: break-word;
-  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), overflow-y 0s;
-  max-height: 5000px;
-  overflow: hidden;
   max-width: 100%;
   min-width: 0;
 }
@@ -1009,18 +1006,20 @@ main {
 }
 
 .desc-clamped {
-  display: -webkit-box;
+  display: -webkit-box !important;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
-  max-height: 4.5em; /* 3 lines * 1.5 line-height */
+  overflow: hidden !important;
+  max-height: 4.5em !important; /* 3 lines * 1.5 line-height */
 }
 
 .desc-expanded {
-  max-height: 250px;
-  overflow-y: auto;
+  display: block !important;
+  max-height: 300px;
+  overflow-y: auto !important;
   overscroll-behavior: contain;
   padding-right: 8px;
-  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), overflow-y 0s 0.4s;
+  -webkit-line-clamp: unset !important;
 }
 
 .more-btn {

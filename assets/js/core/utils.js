@@ -586,22 +586,28 @@ export function cdnify(url) {
   
   try {
     const path = cleanUrl.substring(cleanUrl.toLowerCase().indexOf('raw.githubusercontent.com/') + 26);
-    const parts = path.split('/');
+    let parts = path.split('/').filter(Boolean);
     if (parts.length < 3) return url;
     
     const user = parts[0];
     const repo = parts[1];
-    let branch = parts[2];
-    let pathParts = parts.slice(3);
+    let rest = parts.slice(2);
     
-    // Handle refs/heads/branch or refs/tags/tag
-    if (branch === 'refs' && (pathParts[0] === 'heads' || pathParts[0] === 'tags')) {
-      branch = pathParts[1];
-      pathParts = pathParts.slice(2);
+    // Strip leading 'raw' if present (e.g. /user/repo/raw/refs/heads/main/file.json or /user/repo/raw/main/file.json)
+    if (rest[0] === 'raw') {
+      rest = rest.slice(1);
     }
     
-    // Strip query parameters and hash fragments from file path
-    let pathStr = pathParts.join('/');
+    let branch = rest[0];
+    let fileParts = rest.slice(1);
+    
+    // Handle refs/heads/branch or refs/tags/tag
+    if (branch === 'refs' && (fileParts[0] === 'heads' || fileParts[0] === 'tags')) {
+      branch = fileParts[1];
+      fileParts = fileParts.slice(2);
+    }
+    
+    let pathStr = fileParts.join('/');
     pathStr = pathStr.split('?')[0].split('#')[0];
     
     if (!user || !repo || !branch || !pathStr) return url;

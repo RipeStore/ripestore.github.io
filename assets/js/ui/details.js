@@ -548,6 +548,9 @@ function renderHeavy(app) {
       const toggleDesc = () => {
         const isClamped = descEl.classList.toggle('desc-clamped');
         descEl.classList.toggle('desc-expanded', !isClamped);
+        if (isClamped) {
+          descEl.scrollTop = 0;
+        }
         moreBtn.textContent = isClamped ? 'more' : 'less';
       };
       moreBtn.onclick = toggleDesc;
@@ -981,6 +984,7 @@ function updateVersionUI(sel, app) {
     // Reset state
     whatsNewText.classList.remove('desc-expanded');
     whatsNewText.classList.add('desc-clamped');
+    whatsNewText.scrollTop = 0;
     whatsNewMoreBtn.textContent = 'more';
     
     // Check if expansion is needed
@@ -998,6 +1002,9 @@ function updateVersionUI(sel, app) {
         const toggleWhatsNew = () => {
           const isClamped = whatsNewText.classList.toggle('desc-clamped');
           whatsNewText.classList.toggle('desc-expanded', !isClamped);
+          if (isClamped) {
+            whatsNewText.scrollTop = 0;
+          }
           whatsNewMoreBtn.textContent = isClamped ? 'more' : 'less';
         };
         whatsNewMoreBtn.onclick = toggleWhatsNew;
