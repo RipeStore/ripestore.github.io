@@ -173,9 +173,9 @@ function renderNews(news, allApps = []) {
     
     card.onclick = () => {
       if (n.appID) {
-        const app = allApps.find(a => a.bundle === n.appID);
+        const app = allApps.find(a => a.bundle === n.appID && a.source === n.source) || allApps.find(a => a.bundle === n.appID);
         const nameParam = app ? `&name=${encodeURIComponent(app.name)}` : '';
-        location.href = `app?bundle=${n.appID}${nameParam}&repo=${n.source}`;
+        location.href = `app?bundle=${encodeURIComponent(n.appID)}${nameParam}&repo=${encodeURIComponent(n.source)}`;
       }
       else if (n.url) location.href = n.url;
     };

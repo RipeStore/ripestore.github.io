@@ -20,7 +20,7 @@ export function buildAppCard(app) {
   
   const ver = app._isVersion ? app.version : app.currentVersion;
   const verParam = ver ? `&version=${encodeURIComponent(ver)}` : '';
-  card.href = `app?bundle=${app.bundle}&name=${encodeURIComponent(app.name)}&repo=${app.source}${verParam}`;
+  card.href = `app?bundle=${encodeURIComponent(app.bundle)}&name=${encodeURIComponent(app.name)}&repo=${encodeURIComponent(app.source)}${verParam}`;
   
   const icon = document.createElement('img');
   icon.dataset.src = cdnify(app.icon);

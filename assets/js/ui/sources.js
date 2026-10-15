@@ -1,4 +1,4 @@
-import { $, fetchJSON, showToast, setupModal, cdnify } from '../core/utils.js';
+import { $, fetchJSON, showToast, setupModal, cdnify, db } from '../core/utils.js';
 import { fetchRepo } from '../core/repo.js';
 import { getSources, setSources, getOrigins, setOrigins, addSource as coreAddSource, removeSource } from '../core/sources.js';
 import { removeSplash } from './components.js';
@@ -190,20 +190,77 @@ $('#newSource').addEventListener('keydown', (e) => {
   }
 });
 
+const STATUS_LABELS = { checking: '', updated: 'Updated', current: 'Up to date', failed: 'Failed' };
+
+function setRowStatus(url, state, detail = '') {
+  const row = $('#sourceList')?.querySelector(`[data-url="${CSS.escape(url)}"]`);
+  if (!row) return;
+  let badge = row.querySelector('.src-status');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'src-status';
+    row.appendChild(badge);
+  }
+  badge.dataset.state = state;
+  badge.textContent = STATUS_LABELS[state];
+  badge.title = detail;
+}
+
 const updateBtn = $('#updateBtn');
 if (updateBtn) {
-  updateBtn.addEventListener('click', async () => {
-    const originalText = updateBtn.textContent;
-    updateBtn.textContent = 'Updating...';
+  const setBtnBusy = (label) => {
+    updateBtn.innerHTML = `<span class="btn-spinner"></span>${label}`;
+  };
+
+  updateBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const list = getSources();
+    if (!list.length) {
+      showToast('No sources to update.');
+      return;
+    }
+
     updateBtn.disabled = true;
     updateBtn.classList.add('disabled-btn');
-    
-    const list = getSources();
-    await Promise.allSettled(list.map(url => fetchRepo(url, true)));
-    
+    let done = 0;
+    const counts = { updated: 0, current: 0, failed: 0 };
+    setBtnBusy(`Checking 0/${list.length}`);
+    list.forEach(url => setRowStatus(url, 'checking'));
+
+    await Promise.all(list.map(async url => {
+      let state;
+      let detail = '';
+      try {
+        const res = await fetchRepo(url, true);
+        if (res.failed) {
+          state = 'failed';
+          detail = `Showing cached copy: ${res.error?.message || 'network error'}`;
+        } else {
+          state = res.changed ? 'updated' : 'current';
+        }
+      } catch (err) {
+        state = 'failed';
+        detail = err?.message || 'network error';
+      }
+      counts[state]++;
+      setRowStatus(url, state, detail);
+      setBtnBusy(`Checking ${++done}/${list.length}`);
+    }));
+
+    // Rebuild the merged snapshot on the next page view even if hashes matched, so a snapshot
+    // assembled from an older payload can never outlive a manual update.
+    await db.remove(CFG.MASTER_CACHE_KEY);
+    if (counts.updated > 0) localStorage.setItem('ripe_sources_changed', Date.now().toString());
+
     render();
-    
-    updateBtn.textContent = originalText;
+
+    const parts = [];
+    if (counts.updated) parts.push(`${counts.updated} updated`);
+    if (counts.current) parts.push(`${counts.current} up to date`);
+    if (counts.failed) parts.push(`${counts.failed} failed`);
+    showToast(counts.updated || counts.failed ? parts.join(' · ') : 'All sources are up to date', 3000);
+
+    updateBtn.textContent = 'Update';
     updateBtn.disabled = false;
     updateBtn.classList.remove('disabled-btn');
   });
@@ -225,13 +282,9 @@ removeSplash();
 
 function resolveSourcesToUrls() {
   const list = getSources();
-  const suggestions = [...allSuggestions];
   const defaultRepos = CFG.DEFAULT_REPOS || [{ name: CFG.SOURCE_NAME, url: CFG.SOURCE_URL }];
-  defaultRepos.forEach(def => {
-    if (!suggestions.some(s => s.name === def.name)) {
-      suggestions.push(def);
-    }
-  });
+  // Defaults first so their configured URL wins over a same-named remote suggestion
+  const suggestions = [...defaultRepos, ...allSuggestions];
 
   return list.map(src => {
     if (src.includes('://')) return src;
@@ -242,7 +295,7 @@ function resolveSourcesToUrls() {
   });
 }
 
-function processImport(text) {
+async function processImport(text) {
   if (!text) return;
   text = text.trim();
   
@@ -259,12 +312,12 @@ function processImport(text) {
   
   const lines = text.split(/[\n\r\s,]+/);
   let count = 0;
-  lines.forEach(line => {
+  for (let line of lines) {
     line = line.trim();
     if (line && (line.startsWith('http') || line.indexOf('.') > 0)) {
-       if (coreAddSource(line, 'manual')) count++;
+       if (await coreAddSource(line, 'manual')) count++;
     }
-  });
+  }
   
   if (count > 0) {
     showToast(`Imported ${count} new source(s).`);
@@ -285,23 +338,44 @@ const importFileInput = $('#importFileInput');
 
 setupModal(ioModal, closeIo);
 
-function showIoOption(label, onClick) {
-    const item = document.createElement('div');
-    item.className = 'list-menu-item clickable';
-    item.textContent = label;
-    item.onclick = () => {
-        ioModal.classList.remove('flex');
-        onClick();
-    };
-    ioList.appendChild(item);
+const IO_ICONS = {
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+  clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>'
+};
+
+function openIoMenu(title, options) {
+    ioTitle.textContent = title;
+    ioList.innerHTML = '';
+    const menu = document.createElement('div');
+    menu.className = 'actions-menu';
+    options.forEach(({ label, icon, onClick }) => {
+        const item = document.createElement('div');
+        item.className = 'action-item clickable';
+        item.setAttribute('role', 'button');
+        item.innerHTML = `
+          <span class="action-label">
+            <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IO_ICONS[icon]}</svg>
+            <span></span>
+          </span>
+          <svg class="action-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        `;
+        item.querySelector('.action-label > span').textContent = label;
+        item.onclick = () => {
+            ioModal.classList.remove('flex');
+            onClick();
+        };
+        menu.appendChild(item);
+    });
+    ioList.appendChild(menu);
+    ioModal.classList.add('flex');
 }
 
 if (exportMenuBtn) {
-  exportMenuBtn.onclick = () => {
-      ioTitle.textContent = 'Export Sources';
-      ioList.innerHTML = '';
-      
-      showIoOption('Save to File', () => {
+  exportMenuBtn.onclick = () => openIoMenu('Export Sources', [
+    {
+      label: 'Save to File',
+      icon: 'file',
+      onClick: () => {
         const list = resolveSourcesToUrls();
         const blob = new Blob([list.join('\n')], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -310,9 +384,12 @@ if (exportMenuBtn) {
         a.download = 'ripestore-sources.txt';
         a.click();
         URL.revokeObjectURL(url);
-      });
-      
-      showIoOption('Copy to Clipboard', async () => {
+      }
+    },
+    {
+      label: 'Copy to Clipboard',
+      icon: 'clipboard',
+      onClick: async () => {
         const list = resolveSourcesToUrls();
         try {
             await navigator.clipboard.writeText(list.join('\n'));
@@ -320,32 +397,31 @@ if (exportMenuBtn) {
         } catch(e) {
             showToast('Failed to copy: ' + e.message);
         }
-      });
-      
-      ioModal.classList.add('flex');
-  };
+      }
+    }
+  ]);
 }
 
 if (importMenuBtn) {
-  importMenuBtn.onclick = () => {
-      ioTitle.textContent = 'Import Sources';
-      ioList.innerHTML = '';
-      
-      showIoOption('Import from File', () => {
-          importFileInput.click();
-      });
-      
-      showIoOption('Paste from Clipboard', async () => {
+  importMenuBtn.onclick = () => openIoMenu('Import Sources', [
+    {
+      label: 'Import from File',
+      icon: 'file',
+      onClick: () => importFileInput.click()
+    },
+    {
+      label: 'Paste from Clipboard',
+      icon: 'clipboard',
+      onClick: async () => {
         try {
             const text = await navigator.clipboard.readText();
-            processImport(text);
+            await processImport(text);
         } catch (e) {
             showToast('Failed to read clipboard: ' + e.message);
         }
-      });
-      
-      ioModal.classList.add('flex');
-  };
+      }
+    }
+  ]);
 }
 
 if (importFileInput) {

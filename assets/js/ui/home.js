@@ -153,7 +153,7 @@ function renderFeatured() {
   featuredApps.slice(0, limit).forEach(a => {
     const card = document.createElement('a');
     card.className = 'featured-card';
-    card.href = `app?bundle=${a.bundle}&name=${encodeURIComponent(a.name)}&repo=${a.source}`;
+    card.href = `app?bundle=${encodeURIComponent(a.bundle)}&name=${encodeURIComponent(a.name)}&repo=${encodeURIComponent(a.source)}`;
     
     // Background image if available (using icon as fallback blurred maybe? or just standard style)
     // For now standard style
@@ -282,9 +282,9 @@ function renderNews() {
     card.className = 'news-card';
     card.onclick = () => {
       if (n.appID) {
-        const app = state.allMerged.find(a => a.bundle === n.appID);
+        const app = state.allMerged.find(a => a.bundle === n.appID && a.source === n.source) || state.allMerged.find(a => a.bundle === n.appID);
         const nameParam = app ? `&name=${encodeURIComponent(app.name)}` : '';
-        location.href = `app?bundle=${n.appID}${nameParam}&repo=${n.source}`;
+        location.href = `app?bundle=${encodeURIComponent(n.appID)}${nameParam}&repo=${encodeURIComponent(n.source)}`;
       }
       else if (n.url) location.href = n.url;
     };

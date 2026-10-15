@@ -7,6 +7,45 @@ const NORM_PREFIX = 'norm_cache_';
 const CACHE_DURATION = CFG.CACHE_DURATION;
 const MASTER_CACHE_KEY = CFG.MASTER_CACHE_KEY;
 
+function sameSources(master, sources) {
+  return !!master && JSON.stringify(master.sources) === JSON.stringify(sources);
+}
+
+function isMasterFresh(master, sources, now) {
+  return sameSources(master, sources) && (now - (master.timestamp || 0)) < CACHE_DURATION;
+}
+
+/**
+ * Returns the normalized form of a fetched repo, reusing the cached copy only when
+ * it was produced from the exact same payload (same content hash and resolved URL).
+ */
+async function loadNormalized(src, { data, url, hash }) {
+  const key = NORM_PREFIX + src;
+  const cached = await db.get(key);
+  if (cached && hash !== undefined && cached.hash === hash && cached.url === url) {
+    return { normalized: cached, changed: false };
+  }
+  const normalized = { ...normalizeRepo(data, url), hash, url };
+  await db.set(key, normalized);
+  return { normalized, changed: true };
+}
+
+function buildMerged(allApps, allNews, featured) {
+  const apps = mergeByBundle(allApps);
+  const appBundles = new Set(apps.map(a => a.bundle));
+  const seenNews = new Set();
+  const news = [];
+  allNews.forEach(n => {
+    if (n.appID && !appBundles.has(n.appID)) return;
+    const sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
+    if (!seenNews.has(sig)) {
+      seenNews.add(sig);
+      news.push(n);
+    }
+  });
+  return { apps, news, featured };
+}
+
 /**
  * Fetches and merges all configured repositories.
  */
@@ -14,15 +53,11 @@ export async function fetchAllRepos() {
   const sources = getSources();
   const now = Date.now();
   
-  // 1. Try master cache
-  let master = await db.get(MASTER_CACHE_KEY);
-  if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
-    return master.data;
-  }
+  const master = await db.get(MASTER_CACHE_KEY);
+  if (isMasterFresh(master, sources, now)) return master.data;
 
-  // 2. Fetch all and check for changes
   const results = await Promise.allSettled(sources.map(src => fetchRepo(src)));
-  let anyChanged = !master || JSON.stringify(master.sources) !== JSON.stringify(sources);
+  let anyChanged = !sameSources(master, sources);
   
   const allApps = [];
   let allNews = [];
@@ -30,46 +65,21 @@ export async function fetchAllRepos() {
 
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
-    const src = sources[i];
-    if (res.status === 'fulfilled') {
-      const { data, url, changed } = res.value;
-      
-      // Get normalized data (from cache if not changed)
-      let normalized = await db.get(NORM_PREFIX + src);
-      if (!normalized || changed) {
-        normalized = normalizeRepo(data, url);
-        await db.set(NORM_PREFIX + src, normalized);
-        anyChanged = true;
-      }
-      
-      if (normalized.news) allNews = allNews.concat(normalized.news);
-      if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
-      allApps.push(...normalized.apps);
-    }
+    if (res.status !== 'fulfilled') continue;
+    const { normalized, changed } = await loadNormalized(sources[i], res.value);
+    if (changed) anyChanged = true;
+    if (normalized.news) allNews = allNews.concat(normalized.news);
+    if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
+    allApps.push(...normalized.apps);
   }
 
-  // 3. If nothing changed, just refresh master timestamp
   if (!anyChanged && master) {
     master.timestamp = now;
     await db.set(MASTER_CACHE_KEY, master);
     return master.data;
   }
 
-  // 4. Something changed, re-merge
-  const mergedApps = mergeByBundle(allApps);
-  const appBundles = new Set(mergedApps.map(a => a.bundle));
-  const seenNews = new Set();
-  const uniqueNews = [];
-  allNews.forEach(n => {
-    if (n.appID && !appBundles.has(n.appID)) return;
-    let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
-    if (!seenNews.has(sig)) {
-      seenNews.add(sig);
-      uniqueNews.push(n);
-    }
-  });
-
-  const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
+  const finalData = buildMerged(allApps, allNews, featuredIds);
   await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: now });
   return finalData;
 }
@@ -86,76 +96,46 @@ export async function streamRepos(onUpdate, onComplete) {
       return;
     }
     
-    const now = Date.now();
-    
-    let master = await db.get(MASTER_CACHE_KEY);
-    if (master && (now - (master.timestamp || 0)) < CACHE_DURATION && JSON.stringify(master.sources) === JSON.stringify(sources)) {
+    const master = await db.get(MASTER_CACHE_KEY);
+    if (isMasterFresh(master, sources, Date.now())) {
       onUpdate({ ...master.data, progress: 1 });
       if (onComplete) onComplete();
       return;
     }
 
-    let allApps = [];
+    const total = sources.length;
+    const allApps = [];
     let allNews = [];
     let featuredIds = [];
     let loadedCount = 0;
-    let anyChanged = !master || JSON.stringify(master?.sources) !== JSON.stringify(sources);
-
+    let anyLoaded = false;
     let lastUpdateTime = 0;
     const UPDATE_THROTTLE = 500; 
 
-    const handleResult = async (res, src, isFinal = false) => {
+    // The final (progress === 1) update is emitted once after the loop, because consumers
+    // treat progress 1 as "data complete" and must receive the fully merged payload with it.
+    const handleResult = async (res, src) => {
       loadedCount++;
-      if (res.status === 'fulfilled') {
-        const { data, url, changed } = res.value;
-        
-        let normalized = await db.get(NORM_PREFIX + src);
-        if (!normalized || changed) {
-          normalized = normalizeRepo(data, url);
-          await db.set(NORM_PREFIX + src, normalized);
-          anyChanged = true;
-        }
-        
-        if (normalized.news) allNews = allNews.concat(normalized.news);
-        if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
-        allApps.push(...normalized.apps);
+      const isLast = loadedCount === total;
+      if (res.status !== 'fulfilled') {
+        if (!isLast) onUpdate({ progress: loadedCount / total });
+        return;
+      }
+      anyLoaded = true;
+      const { normalized } = await loadNormalized(src, res.value);
+      if (normalized.news) allNews = allNews.concat(normalized.news);
+      if (normalized.featured) featuredIds = featuredIds.concat(normalized.featured);
+      allApps.push(...normalized.apps);
+      if (isLast) return;
 
-        const now = Date.now();
-        if (isFinal || (now - lastUpdateTime > UPDATE_THROTTLE)) {
-            lastUpdateTime = now;
-            
-            const mergedApps = mergeByBundle(allApps);
-            const appBundles = new Set(mergedApps.map(a => a.bundle));
-            const seenNews = new Set();
-            const uniqueNews = [];
-            allNews.forEach(n => {
-              if (n.appID && !appBundles.has(n.appID)) return;
-              let sig = n.identifier || `${n.appID || n.title || 'unknown'}|${n.date || 'nodate'}`;
-              if (!seenNews.has(sig)) {
-                seenNews.add(sig);
-                uniqueNews.push(n);
-              }
-            });
-
-            const updateData = {
-              apps: mergedApps,
-              news: uniqueNews,
-              featured: featuredIds,
-              progress: (loadedCount / sources.length),
-              currentRepo: normalized.repoName || src
-            };
-
-            if (isFinal) {
-                const finalData = { apps: mergedApps, news: uniqueNews, featured: featuredIds };
-                await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: Date.now() });
-            }
-
-            onUpdate(updateData);
-        } else {
-            onUpdate({ progress: (loadedCount / sources.length), currentRepo: normalized.repoName || src });
-        }
+      const progress = loadedCount / total;
+      const currentRepo = normalized.repoName || src;
+      const now = Date.now();
+      if (now - lastUpdateTime > UPDATE_THROTTLE) {
+        lastUpdateTime = now;
+        onUpdate({ ...buildMerged(allApps, allNews, featuredIds), progress, currentRepo });
       } else {
-          onUpdate({ progress: (loadedCount / sources.length) });
+        onUpdate({ progress, currentRepo });
       }
     };
 
@@ -164,10 +144,15 @@ export async function streamRepos(onUpdate, onComplete) {
       const chunk = sources.slice(i, i + CHUNK_SIZE);
       const results = await Promise.allSettled(chunk.map(src => fetchRepo(src)));
       for (let j = 0; j < results.length; j++) {
-          const isFinal = (i + j + 1) === sources.length;
-          await handleResult(results[j], chunk[j], isFinal);
+        await handleResult(results[j], chunk[j]);
       }
     }
+
+    const finalData = buildMerged(allApps, allNews, featuredIds);
+    if (anyLoaded) {
+      await db.set(MASTER_CACHE_KEY, { sources, data: finalData, timestamp: Date.now() });
+    }
+    onUpdate({ ...finalData, progress: 1 });
 
     if (onComplete) onComplete();
   } catch (err) {
@@ -176,63 +161,79 @@ export async function streamRepos(onUpdate, onComplete) {
   }
 }
 
+async function fetchText(url, init) {
+  const response = await fetch(url, init);
+  if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
+  return response.text();
+}
+
+function withCacheBuster(url, now) {
+  return `${url}${url.includes('?') ? '&' : '?'}t=${now}`;
+}
+
 /**
  * Fetches a repository JSON and checks for changes using content hashing.
+ * Resolves to { data, url, hash, changed } where `changed` means the payload differs from
+ * the previously cached one. When the network fails but a cached copy exists, resolves to the
+ * cached copy with `failed: true` and `error` set instead of rejecting.
+ * `force` bypasses the 15-minute freshness window and every HTTP cache layer we can reach.
  */
 export async function fetchRepo(src, force = false) {
   const cacheKey = CACHE_PREFIX + src;
   const now = Date.now();
-  const cached = await db.get(cacheKey);
+  const defaultRepo = (CFG.DEFAULT_REPOS || []).find(r => r.name === src);
+  const url = src.includes('://') ? src : (defaultRepo ? defaultRepo.url : `${CFG.INTERNAL_REPO_BASE}${src}.json`);
+  const stored = await db.get(cacheKey);
+  // A cached copy downloaded from a different URL (e.g. a default repo that moved) is only
+  // usable as an offline fallback, never as the current payload.
+  const cached = stored && stored.data && stored.data.url === url ? stored : null;
+  const fromCache = (extra) => ({ ...cached.data, hash: cached.hash, changed: false, ...extra });
 
   if (!force && cached && (now - (cached.timestamp || 0)) < CACHE_DURATION) {
-    return { ...cached.data, changed: false };
+    return fromCache();
   }
 
-  const url = src.includes('://') ? src : `${CFG.INTERNAL_REPO_BASE}${src}.json`;
-  
   let text = null;
 
-  // 1. Try original URL directly
   try {
-    const response = await fetch(url, { cache: 'no-cache' });
-    if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
-    text = await response.text();
-  } catch (directErr) {
-    // 2. If direct fetch fails and it's a GitHub raw URL, try jsDelivr CDN fallback (temporary for current session/cache)
-    const cdnUrl = cdnify(url);
-    if (cdnUrl !== url) {
-      const sep = cdnUrl.includes('?') ? '&' : '?';
-      const cdnFetchUrl = `${cdnUrl}${sep}t=${now}`;
+    if (force) {
+      // raw.githubusercontent.com and similar CDNs ignore `cache: 'reload'` at the edge and keep
+      // serving their copy for minutes; a unique query string forces an origin fetch.
       try {
-        const cdnResp = await fetch(cdnFetchUrl, { cache: 'no-cache' });
-        if (!cdnResp.ok) throw new Error(`CDN fallback failed ${cdnResp.status}`);
-        text = await cdnResp.text();
-      } catch (cdnErr) {
-        try {
-          const cdnRespBare = await fetch(cdnUrl, { cache: 'no-cache' });
-          if (!cdnRespBare.ok) throw new Error(`CDN bare fallback failed ${cdnRespBare.status}`);
-          text = await cdnRespBare.text();
-        } catch (_) {
-          if (cached) return { ...cached.data, changed: false };
-          throw directErr;
-        }
+        text = await fetchText(withCacheBuster(url, now), { cache: 'reload' });
+      } catch (_) {
+        text = await fetchText(url, { cache: 'reload' });
       }
     } else {
-      if (cached) return { ...cached.data, changed: false };
+      text = await fetchText(url, { cache: 'no-cache' });
+    }
+  } catch (directErr) {
+    // jsDelivr fallback for GitHub raw URLs (kept only for the current cache window)
+    const cdnUrl = cdnify(url);
+    try {
+      if (cdnUrl === url) throw directErr;
+      try {
+        text = await fetchText(withCacheBuster(cdnUrl, now), { cache: 'no-cache' });
+      } catch (_) {
+        text = await fetchText(cdnUrl, { cache: 'no-cache' });
+      }
+    } catch (_) {
+      if (cached) return fromCache({ failed: true, error: directErr });
+      if (stored) return { ...stored.data, hash: stored.hash, changed: false, failed: true, error: directErr };
       throw directErr;
     }
   }
 
+  const hash = hashString(text);
+
+  if (cached && cached.hash === hash) {
+    cached.timestamp = now;
+    await db.set(cacheKey, cached);
+    return fromCache();
+  }
+
+  let data;
   try {
-    const hash = hashString(text);
-
-    if (cached && cached.hash === hash && !force) {
-      cached.timestamp = now;
-      await db.set(cacheKey, cached);
-      return { ...cached.data, changed: false };
-    }
-
-    let data;
     try {
       data = JSON.parse(text);
     } catch (_) {
@@ -240,15 +241,17 @@ export async function fetchRepo(src, force = false) {
       if (!m) throw new Error("Invalid JSON payload");
       data = JSON.parse(m[0]);
     }
-
-    const result = { data, url };
-    await db.set(cacheKey, { timestamp: now, hash, data: result });
-    
-    return { ...result, changed: true };
   } catch (err) {
-    if (cached) return { ...cached.data, changed: false };
+    if (cached) return fromCache({ failed: true, error: err });
     throw err;
   }
+
+  const result = { data, url };
+  await db.set(cacheKey, { timestamp: now, hash, data: result });
+  // The merged snapshot was built from the old payload; drop it so every page re-merges.
+  await db.remove(MASTER_CACHE_KEY);
+  
+  return { ...result, hash, changed: true };
 }
 
 /**

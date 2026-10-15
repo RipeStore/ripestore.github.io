@@ -1,5 +1,5 @@
 import { $, qs, fetchJSON, formatDate, semverCompare, formatByteCount, linkify, showToast, cdnify, getProxiedImageUrl, isDdgErrorImage, fetchMapping, setupModal, observeSmartImage, PLACEHOLDER_SRC, formatAppTitleHTML, updateSEO, updateMeta, db } from '../core/utils.js';
-import { normalizeRepo, fetchRepo } from '../core/repo.js';
+import { normalizeRepo, fetchRepo, mergeByBundle } from '../core/repo.js';
 import { initCarousel } from '../core/carousel.js';
 import { getSources } from '../core/sources.js';
 import { DEFAULTS as CFG } from '../core/config.js';
@@ -111,47 +111,45 @@ async function init() {
 
   let app = null;
 
+  // Several sources can ship the same bundle ID; the link's `repo` (the listing's source URL)
+  // decides which one is shown. A name match is preferred but not required, since a source may
+  // rename an app between the listing being rendered and the detail page loading.
+  const nameLower = nameParam ? nameParam.toLowerCase() : null;
+  const pickFrom = (apps, source) => {
+    const candidates = apps.filter(a => a.bundle === bundle && (source === undefined || a.source === source));
+    return candidates.find(a => !nameLower || (a.name || '').toLowerCase() === nameLower) || candidates[0] || null;
+  };
+
   // 1. Ultra-fast path: Check master cache in IndexedDB (0ms hit if user browsed home/list)
   try {
     const master = await db.get(CFG.MASTER_CACHE_KEY);
     if (master && master.data && master.data.apps) {
-      app = master.data.apps.find(a => {
-        const matchBundle = a.bundle === bundle;
-        if (!nameParam) return matchBundle;
-        return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
-      });
+      app = pickFrom(master.data.apps, repo);
     }
   } catch (_) {}
 
-  // 2. Fast path: Fetch primary repo (checks IDB repo_cache_ first)
+  // 2. Fast path: Fetch primary repo (checks IDB repo_cache_ first). Merged so that repeated
+  // entries of one bundle inside the same repo combine exactly like they do on the listing.
   if (!app) {
     try {
       const primary = await fetchRepo(repo);
       const norm = normalizeRepo(primary.data, primary.url);
-      
-      // Find by bundle AND name if available, otherwise just bundle
-      app = norm.apps.find(a => {
-        const matchBundle = a.bundle === bundle;
-        if (!nameParam) return matchBundle;
-        return matchBundle && a.name.toLowerCase() === nameParam.toLowerCase();
-      });
+      app = pickFrom(mergeByBundle(norm.apps.filter(a => a.bundle === bundle)));
     } catch (e) {
       console.warn('Primary repo fetch failed, checking cached sources', e);
     }
   }
 
-  // 3. Fallback: Search in other repos if not found in primary
+  // 3. Fallback: the linked source is gone or unreachable, show the same bundle from another source
   if (!app) {
     try {
       const sources = getSources();
-      const otherSources = sources.filter(src => src !== repo);
-      const normMap = await db.getMany(otherSources.map(src => 'norm_cache_' + src));
-      for (const src of otherSources) {
-        const norm = normMap['norm_cache_' + src];
-        if (norm && norm.apps) {
-          app = norm.apps.find(a => a.bundle === bundle && (!nameParam || a.name.toLowerCase() === nameParam.toLowerCase()));
-          if (app) break;
-        }
+      const normMap = await db.getMany(sources.map(src => 'norm_cache_' + src));
+      const norms = sources.map(src => normMap['norm_cache_' + src]).filter(n => n && n.apps);
+      norms.sort((x, y) => (y.url === repo) - (x.url === repo));
+      for (const norm of norms) {
+        app = pickFrom(norm.apps);
+        if (app) break;
       }
     } catch (e) {
       console.warn('Fallback search in sources failed', e);
